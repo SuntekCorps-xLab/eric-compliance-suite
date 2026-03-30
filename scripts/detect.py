@@ -184,7 +184,7 @@ def cmd_d001(args, token):
         risk = "🔴高风险" if sim > 0.8 else ("🟡中风险" if sim > 0.5 else "🟢低风险")
         tro = " [TRO]" if p.get("tro_holder") or p.get("tro_case") else ""
         radar = ""
-        if args.enable_radar and p.get("radar_result", {}).get("same"):
+        if args.enable_radar and (p.get("radar_result") or {}).get("same"):
             radar = " [雷达:疑似侵权]"
             risk = "🔴高风险"
         print(f"{i}. {risk}{tro}{radar}")
