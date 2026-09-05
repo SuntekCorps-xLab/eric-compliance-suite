@@ -1,0 +1,9 @@
+{
+  "success": true,
+  "code": 200,
+  "message": "Synthetic offline example; not a screening result",
+  "data": {
+    "list": ["No similar products found"]
+  },
+  "request_id": "offline-p001-no-match"
+}

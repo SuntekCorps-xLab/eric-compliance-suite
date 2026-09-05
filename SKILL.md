@@ -2,7 +2,8 @@
 name: eric-compliance-suite
 description: 睿观(ERiC) 全功能合规检测套件。集成外观专利(D001)、发明专利(I001)、图形商标(L001)、文本商标+替换词(T001/T002)、版权(C001)、政策合规(P001-P007) 六大检测能力。当用户需要进行任何知识产权合规检测（专利、商标、版权）或电商平台政策合规审查时触发此 skill。
 license: MIT
-version: 1.0.0
+metadata:
+  version: "1.0.0"
 ---
 
 # 睿观 ERiC 合规检测套件
@@ -16,6 +17,13 @@ version: 1.0.0
 export ERIC_API_TOKEN="你获取到的 API Key"
 ```
 
+Windows PowerShell（当前会话）：
+```powershell
+$env:ERIC_API_TOKEN = "你获取到的 API Key"
+```
+
+持久保存可在 PowerShell 执行 `setx ERIC_API_TOKEN "你获取到的 API Key"`，仅在新终端生效。
+
 ## 扣点说明（首次使用必读）
 
 | 检测模式 | 基础扣点 | 开启雷达后 | 说明 |
@@ -28,11 +36,13 @@ export ERIC_API_TOKEN="你获取到的 API Key"
 | C001 版权检测 | 1 点 | 2 点 | **默认开启雷达** |
 | P001 政策-纯图 | 1 点 | - | - |
 | P002 政策-纯文本 | 5 + 特征词数×2 点 | - | 图文同时入参仍为 5+2n 点 |
+| P004-P007 风险特征词管理 | 0 点 | - | P004 另有每日 50 次调用限制 |
 
 **重要提示**:
 - 带雷达的检测模式（D001、L001、C001）默认开启雷达以获得更精准的结果
-- 检测开始前会提示预扣点数，检测完成后会显示实际扣点
-- 如客户端超时导致重试，会说明实际扣费情况
+- 调用前后显示本地估算，不能称为实际扣点；CLI 不查询账单，实际扣点以 ERiC 平台流水为准
+- 请求失败或超时均不能确认扣费，CLI 不自动重试
+- P004-P007 的 0 点依据 [2026-09-04 接入验证](https://github.com/SuntekCorps-xLab/eric-compliance-suite/issues/13)；P002 使用这些词进行检测才另收每词 2 点
 
 ## 功能导航
 
@@ -55,15 +65,18 @@ export ERIC_API_TOKEN="你获取到的 API Key"
 - **禁止将 base64 图片、大体积二进制数据读入 Agent 上下文。** 图片编码和 API 调用必须在代码执行环境中完成。
 - API 响应过大时，先在代码执行环境中提取关键字段摘要再呈现给用户。
 - 涉及图片的接口：D001、L001、C001、P001。
+- 聊天附件若已有运行环境可读取的文件，直接使用该路径。若只能看到图片、无法读取字节，主动说明：“当前附件没有可读取的图片文件，无法编码并提交给 ERiC。请将图片保存到本地后提供路径，或提供公开图片 URL。”不要声称已检测该图片。真实调用已支持 URL 下载。
 
 ## 认证配置
 
-所有接口共用同一 Token。调用前需确认环境变量 `ERIC_API_TOKEN` 已设置。若未设置，提示用户：
+真实调用的所有接口共用同一 Token；离线 `--dry-run` / `--mock-response` 不需要 Token。真实调用前需确认环境变量 `ERIC_API_TOKEN` 已设置。若未设置，提示用户：
 
 ```
 未检测到 ERIC_API_TOKEN 环境变量。请先完成配置：
 1. 登录睿观平台 https://eric-bot.com 获取 API Token
-2. 设置环境变量：export ERIC_API_TOKEN=your_token
+2. Bash / zsh：export ERIC_API_TOKEN="your-api-token"
+   PowerShell：$env:ERIC_API_TOKEN = "your-api-token"
+   PowerShell 持久保存：setx ERIC_API_TOKEN "your-api-token"（新终端生效）
 ```
 
 所有请求的公共 Headers：`Content-Type: application/json`、`Token: <API_TOKEN>`
@@ -106,7 +119,11 @@ python scripts/detect.py p006 123
 python scripts/detect.py p007 --per-page 50 --page 1
 ```
 
-所有子命令均支持 `--json` 输出原始 API 响应。使用 `python scripts/detect.py <子命令> --help` 查看完整参数。
+所有子命令均支持 `--json`，标准输出仅包含原始 API JSON，状态及估算信息写入标准错误；API 失败时退出码非零。`t001 --json` 仅输出 T001，不执行 `--auto-safe-words` 后续请求。使用 `python scripts/detect.py <子命令> --help` 查看完整参数。
+
+首次接入或仅验证 CLI 时可用 `--dry-run` 构造请求，或 `--mock-response <本地JSON>` 验证结果解析；均无需 Token、不联网、不扣点。离线图片仅支持本地文件或 base64，不下载 URL。试运行输出含图片编码，应重定向到本地文件，在代码环境中提取摘要，不要把完整图片请求读入 Agent 上下文。预期请求、模拟响应和测试方式见 [references/offline-testing.md](references/offline-testing.md)。
+
+CLI 校验已记录的文本长度、地区/站点、召回数量和 JSON 结构后才调用 API。依赖见 `requirements.txt`；缺少 requests 时按错误提示安装，或使用 `uv run --with requests scripts/detect.py ...`，脚本不会自动修改 Python 环境。
 
 ## D001 外观专利检测
 
@@ -141,13 +158,16 @@ python scripts/detect.py p007 --per-page 50 --page 1
 
 - **URL**: `POST https://saas.eric-bot.com/v1.0/eric-api/trademark/graphic/v1/detection`
 - **必需参数**: `base64_image`, `top_number`(1-100)
-- **可选参数**: `product_title`, `trademark_name`, `regions`(15个国家), `enable_localizing`, `enable_radar`
+- **可选参数**: `product_title`, `trademark_name`, `regions`(16个地区代码，见下方), `enable_localizing`, `enable_radar`
 - **关键响应**: `data.detection_results[]` → `top_graphic_trademarks[]` → `graphic_trademarks[]` 含 `similarity`, `trademark_name`, `applicant_name`, `trade_mark_status`, `nice_class[]`, `sub_radar_result`
 - **风险判断**: `sub_radar_result = "high_risk"` 或 `similarity > 0.8` → 高风险
 - **费用**: 10 点/次（**默认开启雷达 15 点/次**）
-- **默认站点**: 全部（US, WO, ES, GB, DE, IT, CA, MX, EM, AU, FR, JP, TR, BX, CN）
+- **默认站点**: 不传地区，由服务端检索全部可用地区
 
 详细参数、响应字段、错误码和代码示例见 [references/logo-detection.md](references/logo-detection.md)。
+
+- **支持地区**: US, WO, ES, GB, DE, IT, CA, MX, EM, AU, FR, JP, TR, BX, CN, EU。CLI 帮助和校验共用 `scripts/detect.py` 中的 `SUPPORTED_REGIONS`。
+- `EU` 已有单地区请求成功记录；`EM` 是欧盟商标局代码。服务端是否将两者视为等价尚未确认，CLI 保留输入值，不互相转换。
 
 ## T001 文本商标检测 + T002 替换词
 
@@ -157,11 +177,14 @@ T001 检测产品文本中的商标词及风险等级；T002 为高风险词生�
 
 - **URL**: `POST https://saas.eric-bot.com/v1.0/eric-api/trademark/text/v1/detection`
 - **必需参数**: `product_title`(≤300字符)
-- **可选参数**: `product_text`(≤5000字符), `regions`(支持15个国家: AU, BX, CA, DE, EM, ES, FR, GB, IT, JP, MX, TR, US, WO, CN)
+- **可选参数**: `product_text`(≤5000字符), `regions`(支持地区见下方；CLI 默认 US)
 - **关键响应**: `data.text_trademarks[]` 含 `trademark_name`, `highest_mode_score`(0-5), `status`, `is_active_holder`, `is_famous`, `region_score[]`；`data.text_trademark_radar`(0=低风险/1=待核查/2=高风险)
 - **费用**: 1 点/次
 - **超时**: 90 秒
 - **默认站点**: US
+
+- **支持地区**: AU, BX, CA, DE, EM, ES, FR, GB, IT, JP, MX, TR, US, WO, CN。CLI 帮助和校验共用 `scripts/detect.py` 中的 `SUPPORTED_REGIONS`。
+- 原始 API 的 `regions` 可省略或为空数组，由服务端选择默认范围；当前证据未确定该范围。CLI 省略时显式发送 `["US"]`，`--regions` 至少传一个代码。
 
 ### T002 商标替换词
 
@@ -181,7 +204,8 @@ T001 检测产品文本中的商标词及风险等级；T002 为高风险词生�
 - **URL**: `POST https://saas.eric-bot.com/v1.0/eric-api/copyright/v1/detection`
 - **必需参数**: `img_64lis`(图片base64数组), `top_number`(默认100, 最大200), `enable_radar`(bool)
 - **关键响应**: `data.list[]` 含 `similarity`(相似度), `path`(版权画图片), `rights_owner`, `copyright_code`, `copyright_url`, `sub_radar_result`, `tro_holder`
-- **风险判断**: `similarity > 0.8` 或 `sub_radar_result = "high_risk"` → 高风险
+- **雷达语义**: `data.radar_result` 为整体结果，`data.list[].sub_radar_result` 为条目结果；`1`/`"1"`/`"high_risk"` 表示高风险，`0`/`"0"`/`"low_risk"` 表示未标记高风险，`null`/缺失/未知值表示未分析或未知
+- **风险判断**: `similarity > 0.8` 或启用雷达且条目雷达为正值 → 高风险；整体雷达单独展示，不推断每条结果均命中。雷达集成在 C001，通过 `enable_radar` 控制
 - **费用**: 1 点/次（**默认开启雷达 2 点/次**）
 
 详细参数、响应字段、错误码和代码示例见 [references/copyright-detection.md](references/copyright-detection.md)。
@@ -216,6 +240,8 @@ T001 检测产品文本中的商标词及风险等级；T002 为高风险词生�
 | P005 保存 | `policy-compliance/feature/v1/save` | `word` |
 | P006 删除 | `policy-compliance/feature/v1/delete` | `id` |
 | P007 列表 | `policy-compliance/feature/v1/list` | `per_page`, `page` |
+
+P004、P005、P006、P007 管理操作预计均为 0 点；P004 每日最多调用 50 次，次数上限与点数计费独立。P002 执行特征检测为基础 5 点加每个启用词 2 点。
 
 URL 前缀: `https://saas.eric-bot.com/v1.0/eric-api/`
 
