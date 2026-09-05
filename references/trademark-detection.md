@@ -20,7 +20,9 @@
 |-----------|------|----------|-------------|
 | `product_title` | string | true | 产品标题（最大 300 字符） |
 | `product_text` | string | false | 产品的其他文本信息（最大 5000 字符） |
-| `regions` | array | true | 售卖国家/地区代码，支持：US, GB, DE, JP, AU, TR, IT, ES, MX, NL, CA, FR |
+| `regions` | array | false | 售卖国家/地区代码，支持：AU, BX, CA, DE, EM, ES, FR, GB, IT, JP, MX, TR, US, WO, CN |
+
+地区列表与 `scripts/detect.py` 的 `SUPPORTED_REGIONS["t001"]` 一致，并由回归测试检查。原始 API 可省略 `regions` 或传 `[]`，由服务端选择默认范围；现有验证未确定该范围。CLI 省略 `--regions` 时显式发送 `["US"]`，传该选项时至少需要一个代码。`CN` 可用，`NL` 被拒绝，详见 [2026-09-04 验证记录](https://github.com/SuntekCorps-xLab/eric-compliance-suite/issues/10)。
 
 ### 请求示例
 

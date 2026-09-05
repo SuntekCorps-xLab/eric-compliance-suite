@@ -1,5 +1,19 @@
 # 政策合规检测 API 参考
 
+## 点数与调用次数
+
+| 接口 | 预计点数 | 限额与说明 |
+| --- | ---: | --- |
+| P001 纯图检测 | 1 | 检测枪械配件图片 |
+| P002 文本/特征检测 | 5 + 2 × 启用特征词数 | 同时传图文仍为此公式 |
+| P004 特征词联想 | 0 | 每日最多 50 次；次数限制独立于点数 |
+| P005 特征词保存 | 0 | 保存管理操作 |
+| P006 特征词删除 | 0 | 删除管理操作 |
+| P007 特征词列表 | 0 | 查询管理操作 |
+
+P004-P007 的零点数依据 [2026-09-04 接入验证](https://github.com/SuntekCorps-xLab/eric-compliance-suite/issues/13)。管理词不收点；在 P002 中启用这些词执行检测才按每词 2 点收费。CLI 仅显示本地估算，实际费用以平台流水为准。
+
+
 ## P001 纯图检测
 
 ### 接口信息
@@ -87,7 +101,7 @@
 
 1. 标题传参最大 300 个字符，描述传参最大 5000 个字符
 2. 返回结果数量不可自定义
-3. 每次调用收取 5 点费用（5 点/次），**图文同时入参检测仍为 5 点**（不分开计费）
+3. 基础检测预计 5 点，每个启用的风险特征词另加 2 点；图文同时入参仍为 5+2n 点
 
 ### 请求参数
 
@@ -95,7 +109,7 @@
 |-----------|------|----------|-------------|
 | `type` | array | false | P001 返回了 cosine>=0.4 的结果时传入对应类型 |
 | `product_title` | string | true | 产品标题（最大 300 字符） |
-| `product_description` | string | true | 产品描述（最大 5000 字符） |
+| `product_description` | string | false | 产品描述（最大 5000 字符；CLI 默认空字符串） |
 | `product_title_suspected` | array | false | type 有值时传入 P001 中相似度最高的违规产品标题 |
 | `platform_sites` | object | true | 平台与国家/地区映射，如 `{"amazon": ["us", "jp"]}` |
 | `feature_detect` | object | false | 风险特征词检测配置 |
@@ -105,9 +119,11 @@
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `enable` | boolean | true | 是否开启风险特征词检测 |
-| `features` | array | false | 自定义特征词列表 |
-| `feature_word_ids` | array | false | P007 中已保存的特征词 ID 列表 |
-| `image` | string | false | 产品图片 base64（用于特征词图文联合检测） |
+| `features` | object | false | 配置对象，包含下列两个字段 |
+| `features.feature_word_ids` | array | false | P007 中已保存的正整数 ID 列表 |
+| `features.image` | string | false | 产品图片 URL，用于特征词图文联合检测 |
+
+CLI 的 `--sites` 支持 br, fr, au, us, uk, jp, it, es, mx, de, ca（英国为 `uk`）。`--platform-sites` 必须是非空对象，值为非空站点数组。`--enable-feature` 需要非空 `--feature-word-ids` 正整数数组；ID 不得重复。传入特征词或图片时必须同时启用 `--enable-feature`。`--suspected` 需配合 `--type`，会转成单元素标题数组。
 
 ### 请求示例
 

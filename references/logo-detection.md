@@ -20,12 +20,14 @@
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `product_title` | string | false | 产品标题 |
-| `top_number` | int | true | 返回商标的最大数量（实际可能少于该值） |
+| `top_number` | int | true | 返回商标的最大数量，范围 1-100（实际可能少于该值） |
 | `trademark_name` | string | false | 可能的图形 logo 名称 |
-| `regions` | array | false | 检测国家/地区，不传默认全部。支持：US, WO, ES, GB, DE, IT, CA, MX, EM, AU, FR, JP, TR, BX, CN |
+| `regions` | array | false | 检测国家/地区，不传默认全部。支持：US, WO, ES, GB, DE, IT, CA, MX, EM, AU, FR, JP, TR, BX, CN, EU |
 | `base64_image` | string | true | 产品图片 base64 编码 |
 | `enable_localizing` | boolean | false | 是否开启切图（自动识别 logo 区域），默认 false |
 | `enable_radar` | boolean | false | 是否开启雷达检测，默认 false |
+
+地区列表与 `scripts/detect.py` 的 `SUPPORTED_REGIONS["l001"]` 一致，并由回归测试检查。`EU` 的单地区请求已验证成功，见 [2026-09-04 验证记录](https://github.com/SuntekCorps-xLab/eric-compliance-suite/issues/11)。`EU` 是地区输入代码，`EM` 是[欧盟知识产权局的 WIPO 代码](https://www.wipo.int/en/web/standards/surveys/st91-implementation/collated)；现有证据未确认后端是否将两者视为等价，CLI 保留输入值，不互相转换。
 
 ## 请求示例
 

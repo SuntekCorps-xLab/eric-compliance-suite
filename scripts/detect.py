@@ -3,14 +3,33 @@
 子命令: d001, i001, l001, t001, t002, c001, p001, p002, p004, p005, p006, p007
 """
 
-import sys, os, json, base64
+import argparse
+import base64
+import binascii
+import copy
+import json
+import os
+import sys
 
 # Windows 中文环境默认使用 GBK 编码，无法输出 emoji 字符，强制切换到 UTF-8
-if sys.stdout.encoding and sys.stdout.encoding.lower().replace("-", "") != "utf8":
-    sys.stdout.reconfigure(encoding="utf-8")
-    sys.stderr.reconfigure(encoding="utf-8")
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, "reconfigure") and stream.encoding != "utf-8":
+        stream.reconfigure(encoding="utf-8")
 
 BASE = "https://saas.eric-bot.com/v1.0/eric-api"
+
+# CLI help and validation share these contracts; documentation is checked in tests.
+SUPPORTED_REGIONS = {
+    "d001": tuple("SE EU CH IE BR MX US WO GB IL JP IN DK DE AU IT NZ AT CA BX FI FR CN KR TH MY".split()),
+    "i001": ("US",),
+    "l001": tuple("US WO ES GB DE IT CA MX EM AU FR JP TR BX CN EU".split()),
+    "t001": tuple("AU BX CA DE EM ES FR GB IT JP MX TR US WO CN".split()),
+}
+SUPPORTED_SITES = tuple("br fr au us uk jp it es mx de ca".split())
+
+
+class CLIError(Exception):
+    """An actionable error that does not need a traceback."""
 
 # 扣点配置表
 POINT_COSTS = {
@@ -22,6 +41,7 @@ POINT_COSTS = {
     "c001": {"base": 1, "radar": 2, "has_radar": True},  # 雷达+1
     "p001": {"base": 1, "radar": 1, "has_radar": False},
     "p002": {"base": 5, "radar": 5, "has_radar": False},  # 图文同时检测仍为5点
+    **{cmd: {"base": 0, "has_radar": False} for cmd in ("p004", "p005", "p006", "p007")},
 }
 
 # 默认站点配置
@@ -33,115 +53,142 @@ DEFAULT_REGIONS = {
     "p002": ["us"],
 }
 
-def _calc_points(cmd, enable_radar=False, enable_scan=False):
-    """根据命令和选项计算扣点数"""
-    cost_info = POINT_COSTS.get(cmd, {})
-    if enable_radar and enable_scan and "radar_scan" in cost_info:
-        return cost_info["radar_scan"]
-    if enable_scan and "scan" in cost_info:
-        return cost_info["scan"]
-    if enable_radar:
-        return cost_info.get("radar", cost_info.get("base", 0))
-    return cost_info.get("base", 0)
+def estimate_points(args):
+    cost = POINT_COSTS[args.command]
+    points = cost["radar"] if cost["has_radar"] and not args.no_radar else cost["base"]
+    if args.command == "p002" and args.enable_feature:
+        points += 2 * len(args.feature_word_ids)
+    return points
 
-def show_pre_deduct(cmd, enable_radar=False, extra_info="", enable_scan=False):
-    """检测开始前展示预扣点信息"""
-    cost_info = POINT_COSTS.get(cmd, {})
-    points = _calc_points(cmd, enable_radar, enable_scan)
-    notes = []
-    if enable_radar and cost_info.get("has_radar"):
-        notes.append("含雷达分析")
-    if enable_scan:
-        notes.append("含全网扫描")
-    note_str = f"（{'，'.join(notes)}）" if notes else ""
-    print(f"📊 本次预扣 {points} 点{note_str}")
-    if extra_info:
-        print(f"   {extra_info}")
-    print()
 
-def show_actual_deduct(cmd, enable_radar=False, retry_count=0, enable_scan=False):
-    """检测完成后展示实际扣点信息"""
-    cost_info = POINT_COSTS.get(cmd, {})
-    points = _calc_points(cmd, enable_radar, enable_scan)
-    total = points * (retry_count + 1) if retry_count > 0 else points
-    if retry_count > 0:
-        print(f"\n💰 本次检测实际扣点: {total} 点（含 {retry_count} 次超时重试，每次 {points} 点）")
+def request_headers(token):
+    return {"Content-Type": "application/json", "Token": token}
+
+
+def perform_request(args, token, path, payload, timeout=120):
+    """Shared preview, transport, failure handling and estimated billing for all commands."""
+    points = estimate_points(args)
+    if args.dry_run:
+        preview = {
+            "dry_run": True,
+            "command": args.command,
+            "method": "POST",
+            "url": f"{BASE}/{path}",
+            "headers": request_headers("<redacted>" if token else "<ERIC_API_TOKEN>"),
+            "token_configured": bool(token),
+            "payload": payload,
+            "estimated_points": points,
+            "points_consumed": 0,
+        }
+        if getattr(args, "auto_safe_words", False):
+            preview["follow_up"] = "T002: 每个高风险词预计 1 点；词数取决于 T001 响应，试运行不执行。"
+        print(json.dumps(preview, ensure_ascii=False, indent=2))
+        raise SystemExit(0)
+
+    if args.mock_response:
+        if not args.mock_responses:
+            raise CLIError("模拟响应已用完；请提供包含后续 T002 响应的 JSON 数组。")
+        result = args.mock_responses.pop(0)
+        print(f"模拟 {args.command.upper()}：未发送请求，消耗 0 点（真实调用预计 {points} 点）", file=sys.stderr)
     else:
-        print(f"\n💰 本次检测实际扣点: {total} 点")
+        print(f"📊 {args.command.upper()} 预计扣点: {points} 点（本地估算）", file=sys.stderr)
+        result = api_call(token, path, payload, timeout)
+
+    if not isinstance(result, dict) or not isinstance(result.get("success"), bool):
+        raise CLIError("API 响应格式无效：需要含布尔 success 字段的 JSON 对象。")
+    if not result["success"]:
+        if args.json:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        print(f"API 错误 [{result.get('code')}]: {result.get('message')}", file=sys.stderr)
+        if not args.mock_response:
+            print("请求失败，扣点未确认；请以 ERiC 平台流水为准。", file=sys.stderr)
+        raise SystemExit(1)
+    if not args.mock_response:
+        print(f"💰 {args.command.upper()} 调用完成，预计扣点: {points} 点；实际扣点请以 ERiC 平台流水为准。", file=sys.stderr)
+    return result
+
 
 def show_default_regions(cmd, regions):
-    """展示默认检测国家站点"""
-    default = DEFAULT_REGIONS.get(cmd)
-    if regions is None and default is not None:
-        print(f"📍 检测站点: {', '.join(default)}（默认）")
-    elif regions is None and default is None:
-        print(f"📍 检测站点: 全部国家/地区")
-    else:
-        print(f"📍 检测站点: {', '.join(regions)}")
+    regions = DEFAULT_REGIONS.get(cmd) if regions is None else regions
+    label = ', '.join(regions) if regions is not None else "全部国家/地区"
+    print(f"📍 检测站点: {label}", file=sys.stderr)
+
 
 def check_token():
-    token = os.environ.get("ERIC_API_TOKEN")
+    token = os.environ.get("ERIC_API_TOKEN", "").strip()
     if not token:
-        print("错误: 未设置 ERIC_API_TOKEN 环境变量。")
-        print("请先获取 Token：登录 https://eric-bot.com → API Token")
-        print("然后设置环境变量：export ERIC_API_TOKEN=your_token")
-        sys.exit(1)
+        raise CLIError(
+            "未设置 ERIC_API_TOKEN 环境变量。登录 https://eric-bot.com 获取 API Token。\n"
+            'Bash / zsh: export ERIC_API_TOKEN="your-api-token"\n'
+            'PowerShell（当前会话）: $env:ERIC_API_TOKEN = "your-api-token"\n'
+            'PowerShell（持久保存，新终端生效）: setx ERIC_API_TOKEN "your-api-token"\n'
+            "无需 Token 的离线验证：在命令后添加 --dry-run 或 --mock-response <JSON文件>。"
+        )
     return token
+
 
 def ensure_requests():
     try:
         import requests
         return requests
-    except ImportError:
-        import subprocess
-        print("正在安装 requests...")
-        subprocess.run(
-            [sys.executable, "-m", "pip", "install", "requests", "-q"],
-            check=True,
-            capture_output=True
-        )
-        import requests
-        return requests
+    except ImportError as exc:
+        raise CLIError(
+            "缺少 requests；请在项目目录执行 python -m pip install -r requirements.txt，"
+            "或 uv pip install -r requirements.txt。\n"
+            "也可直接使用 uv run --with requests scripts/detect.py <子命令及参数>。"
+        ) from exc
+
 
 def api_call(token, path, payload, timeout=120):
     requests = ensure_requests()
-    resp = requests.post(
-        f"{BASE}/{path}",
-        headers={"Content-Type": "application/json", "Token": token},
-        json=payload,
-        timeout=timeout,
-    )
-    return resp.json()
+    try:
+        resp = requests.post(
+            f"{BASE}/{path}", headers=request_headers(token), json=payload, timeout=timeout,
+        )
+        # Preserve ERiC error envelopes, including those delivered with HTTP 4xx/5xx.
+        result = resp.json()
+        if not isinstance(result, dict) or result.get("success") is not False:
+            resp.raise_for_status()
+        return result
+    except (requests.RequestException, ValueError) as exc:
+        raise CLIError(
+            "API 请求失败或响应不是有效 JSON；未自动重试，扣点未确认，请查看 ERiC 平台流水。"
+        ) from exc
 
-def load_image(source):
-    """加载图片并返回 base64 字符串。支持三种输入：
-    1. 本地文件路径: /path/to/image.png
-    2. URL: https://example.com/image.jpg
-    3. base64 字符串: 直接返回
-    """
-    # URL
+
+def load_image(source, offline=False):
+    """Encode a local file, downloaded URL or fully validated base64 string."""
     if source.startswith(("http://", "https://")):
+        if offline:
+            raise CLIError("离线模式不下载图片 URL；请先保存图片，再提供本地路径或 base64。")
         requests = ensure_requests()
         try:
             resp = requests.get(source, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
             resp.raise_for_status()
-            return base64.b64encode(resp.content).decode()
-        except Exception as e:
-            print(f"错误: 下载图片失败: {e}")
-            sys.exit(1)
-    # 本地文件
-    if os.path.isfile(source):
-        with open(source, "rb") as f:
-            return base64.b64encode(f.read()).decode()
-    # 尝试当作 base64 字符串
+            if not resp.content:
+                raise CLIError("下载的图片为空。")
+            return base64.b64encode(resp.content).decode("ascii")
+        except requests.RequestException as exc:
+            raise CLIError("下载图片失败；请检查图片 URL 或改用本地路径。") from exc
     try:
-        base64.b64decode(source[:64], validate=True)
-        return source
-    except Exception:
+        if os.path.isfile(source):
+            with open(source, "rb") as f:
+                content = f.read()
+            if not content:
+                raise CLIError("图片文件为空。")
+            return base64.b64encode(content).decode("ascii")
+    except OSError as exc:
+        raise CLIError(f"无法读取图片文件：{exc}") from exc
+    try:
+        if source and base64.b64decode(source, validate=True):
+            return source
+    except (ValueError, binascii.Error):
         pass
-    print(f"错误: 无法识别图片来源: {source}")
-    print("支持: 本地文件路径 / URL / base64 字符串")
-    sys.exit(1)
+    raise CLIError(
+        "无法识别图片来源。请提供可访问的本地图片路径、HTTP(S) URL 或完整 base64。\n"
+        "聊天中可见的图片不一定有可读取的文件；请将图片保存到本地后提供路径，或提供公开图片 URL。"
+    )
+
 
 # ── D001 外观专利检测 ──────────────────────────────────────────
 
@@ -149,11 +196,9 @@ def cmd_d001(args, token):
     # 默认开启雷达，使用 --no-radar 关闭
     enable_radar = not getattr(args, 'no_radar', False)
 
-    # 展示预扣点和检测站点
     show_default_regions("d001", args.regions)
-    show_pre_deduct("d001", enable_radar)
 
-    img_b64 = load_image(args.image)
+    img_b64 = load_image(args.image, offline=args.dry_run or bool(args.mock_response))
     payload = {
         "product_title": args.title,
         "product_description": args.description,
@@ -167,15 +212,11 @@ def cmd_d001(args, token):
         "query_mode": args.mode,
         "enable_radar": enable_radar,
     }
-    result = api_call(token, "patent/design/v1/detection", payload)
+    result = perform_request(args, token, "patent/design/v1/detection", payload)
 
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
-        show_actual_deduct("d001", enable_radar)
         return
-    if not result.get("success"):
-        print(f"API 错误 [{result.get('code')}]: {result.get('message')}")
-        sys.exit(1)
 
     patents = result.get("data", {}).get("list", [])
     print(f"共找到 {len(patents)} 条相似外观专利\n")
@@ -184,7 +225,7 @@ def cmd_d001(args, token):
         risk = "🔴高风险" if sim > 0.8 else ("🟡中风险" if sim > 0.5 else "🟢低风险")
         tro = " [TRO]" if p.get("tro_holder") or p.get("tro_case") else ""
         radar = ""
-        if args.enable_radar and (p.get("radar_result") or {}).get("same"):
+        if enable_radar and (p.get("radar_result") or {}).get("same"):
             radar = " [雷达:疑似侵权]"
             risk = "🔴高风险"
         print(f"{i}. {risk}{tro}{radar}")
@@ -195,16 +236,13 @@ def cmd_d001(args, token):
     if len(patents) > 20:
         print(f"... 还有 {len(patents) - 20} 条结果未显示，使用 --json 查看完整结果")
 
-    show_actual_deduct("d001", enable_radar)
 
 # ── I001 发明专利检测 ──────────────────────────────────────────
 
 def cmd_i001(args, token):
-    # 展示预扣点和检测站点
     show_default_regions("i001", args.regions)
-    show_pre_deduct("i001")
 
-    result = api_call(token, "patent/utility/v1/detection", {
+    result = perform_request(args, token, "patent/utility/v1/detection", {
         "product_title": args.title,
         "product_description": args.description,
         "regions": args.regions,
@@ -213,11 +251,7 @@ def cmd_i001(args, token):
 
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
-        show_actual_deduct("i001")
         return
-    if not result.get("success"):
-        print(f"API 错误 [{result.get('code')}]: {result.get('message')}")
-        sys.exit(1)
 
     patents = result.get("data", {}).get("data", [])
     print(f"共找到 {len(patents)} 条相似发明专利\n")
@@ -233,7 +267,6 @@ def cmd_i001(args, token):
     if len(patents) > 20:
         print(f"... 还有 {len(patents) - 20} 条结果未显示，使用 --json 查看完整结果")
 
-    show_actual_deduct("i001")
 
 # ── L001 图形商标检测 ──────────────────────────────────────────
 
@@ -241,11 +274,9 @@ def cmd_l001(args, token):
     # 默认开启雷达，使用 --no-radar 关闭
     enable_radar = not getattr(args, 'no_radar', False)
 
-    # 展示预扣点和检测站点
     show_default_regions("l001", args.regions)
-    show_pre_deduct("l001", enable_radar)
 
-    img_b64 = load_image(args.image)
+    img_b64 = load_image(args.image, offline=args.dry_run or bool(args.mock_response))
     payload = {
         "product_title": args.title,
         "base64_image": img_b64,
@@ -257,15 +288,11 @@ def cmd_l001(args, token):
     if args.regions:
         payload["regions"] = args.regions
 
-    result = api_call(token, "trademark/graphic/v1/detection", payload)
+    result = perform_request(args, token, "trademark/graphic/v1/detection", payload)
 
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
-        show_actual_deduct("l001", enable_radar)
         return
-    if not result.get("success"):
-        print(f"API 错误 [{result.get('code')}]: {result.get('message')}")
-        sys.exit(1)
 
     data = result.get("data", {})
     print(f"检测到 {data.get('bounding_box_count', 0)} 个logo区域")
@@ -289,19 +316,15 @@ def cmd_l001(args, token):
                 print(f"  ... 还有 {len(tms) - 10} 条")
         print()
 
-    show_actual_deduct("l001", enable_radar)
 
 # ── T001 文本商标检测 ──────────────────────────────────────────
 
 def cmd_t001(args, token):
-    # 展示预扣点和检测站点
     show_default_regions("t001", args.regions)
     # 首次检测只调 T001，不自动调 T002
-    auto_safe = args.auto_safe_words if hasattr(args, 'auto_safe_words') else False
-    extra_info = "（使用 --auto-safe-words 可自动获取高风险词替换建议，每词额外扣 1 点）" if not auto_safe else ""
-    show_pre_deduct("t001", extra_info=extra_info)
+    auto_safe = args.auto_safe_words
 
-    result = api_call(token, "trademark/text/v1/detection", {
+    result = perform_request(args, token, "trademark/text/v1/detection", {
         "product_title": args.title,
         "product_text": args.text,
         "regions": args.regions,
@@ -309,21 +332,16 @@ def cmd_t001(args, token):
 
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
-        show_actual_deduct("t001")
         return
-    if not result.get("success"):
-        print(f"API 错误 [{result.get('code')}]: {result.get('message')}")
-        sys.exit(1)
 
     data = result.get("data", {})
     radar = data.get("text_trademark_radar", 0)
     radar_labels = {0: "🟢低风险", 1: "🟡待人工核查", 2: "🔴高风险"}
     print(f"整体风险等级: {radar_labels.get(radar, radar)}\n")
 
-    trademarks = data.get("text_trademarks", [])
+    trademarks = data.get("text_trademarks", data.get("trademark_list", []))
     if not trademarks:
         print("未检测到商标词风险")
-        show_actual_deduct("t001")
         return
 
     trademarks.sort(key=lambda x: x.get("highest_mode_score", 0), reverse=True)
@@ -336,42 +354,29 @@ def cmd_t001(args, token):
         if tm.get("is_amazon_brand"): flags.append("Amazon品牌")
         if tm.get("is_common_sense"): flags.append("常用词")
         flag_str = f" [{', '.join(flags)}]" if flags else ""
-        print(f"{i}. {risk} {tm.get('trademark_name', '')} (分数:{score}/5, 状态:{tm.get('status', '')}){flag_str}")
+        print(f"{i}. {risk} {tm.get('trademark_name', tm.get('trademark', ''))} (分数:{score}/5, 状态:{tm.get('status', '')}){flag_str}")
         rs = tm.get("region_score", [])
         if rs:
             scores_str = ", ".join(f"{r.get('region','')}:{r.get('score',0)}" for r in rs)
             print(f"   各国风险: {scores_str}")
 
-    # 统计实际扣点（T001 固定 1 点）
-    t002_count = 0
-
-    # 自动获取替换词（仅当用户显式指定 --auto-safe-words 时）
     if auto_safe:
         high_risk = [tm for tm in trademarks if tm.get("highest_mode_score", 0) >= 3]
+        followup_args = copy.copy(args)
+        followup_args.command = "t002"
         for tm in high_risk:
-            _get_safe_words(token, args.title, args.text, tm.get("trademark_name", ""))
-            t002_count += 1
-
-    # 展示实际扣点
-    total_points = 1 + t002_count  # T001 1点 + T002 每次1点
-    if t002_count > 0:
-        print(f"\n💰 本次检测实际扣点: {total_points} 点（T001: 1点 + T002替换词: {t002_count}点）")
-    else:
-        show_actual_deduct("t001")
+            _get_safe_words(followup_args, token, args.title, args.text, tm.get("trademark_name", tm.get("trademark", "")))
 
 # ── T002 商标替换词 ────────────────────────────────────────────
 
-def _get_safe_words(token, title, text, trademark_name, output_json=False):
-    result = api_call(token, "trademark/text/v1/safe-words-generation", {
+def _get_safe_words(args, token, title, text, trademark_name, output_json=False):
+    result = perform_request(args, token, "trademark/text/v1/safe-words-generation", {
         "product_title": title,
         "product_text": text,
         "trademark_name": trademark_name,
     }, timeout=60)
     if output_json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
-        return
-    if not result.get("success"):
-        print(f"API 错误 [{result.get('code')}]: {result.get('message')}")
         return
     words = result.get("data", {}).get("words", [])
     if words:
@@ -380,20 +385,38 @@ def _get_safe_words(token, title, text, trademark_name, output_json=False):
         print(f"\n未找到「{trademark_name}」的合适替换词")
 
 def cmd_t002(args, token):
-    _get_safe_words(token, args.title, args.text, args.trademark, args.json)
+    _get_safe_words(args, token, args.title, args.text, args.trademark, args.json)
 
 # ── C001 版权检测 ──────────────────────────────────────────────
+
+def normalize_radar(value):
+    """1/0 and legacy high_risk/low_risk; absent or unknown stays unknown."""
+    if isinstance(value, str):
+        value = value.strip().lower()
+    if value in (1, "1", "high_risk"):
+        return True
+    if value in (0, "0", "low_risk"):
+        return False
+    return None
+
+
+def radar_label(value):
+    normalized = normalize_radar(value)
+    if normalized is True:
+        return "🔴高风险"
+    if normalized is False:
+        return "未标记高风险"
+    return "未分析/未知"
+
 
 def cmd_c001(args, token):
     # 默认开启雷达，使用 --no-radar 关闭
     enable_radar = not getattr(args, 'no_radar', False)
 
-    # 展示预扣点
-    print("📍 版权库匹配检测")
-    show_pre_deduct("c001", enable_radar)
+    print("📍 版权库匹配检测", file=sys.stderr)
 
-    img_b64 = load_image(args.image)
-    result = api_call(token, "copyright/v1/detection", {
+    img_b64 = load_image(args.image, offline=args.dry_run or bool(args.mock_response))
+    result = perform_request(args, token, "copyright/v1/detection", {
         "img_64lis": [img_b64],
         "top_number": args.top,
         "enable_radar": enable_radar,
@@ -401,48 +424,42 @@ def cmd_c001(args, token):
 
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
-        show_actual_deduct("c001", enable_radar)
         return
-    if not result.get("success"):
-        print(f"API 错误 [{result.get('code')}]: {result.get('message')}")
-        sys.exit(1)
 
-    items = result.get("data", {}).get("list", [])
+    data = result.get("data") or {}
+    items = data.get("list") or []
+    if enable_radar:
+        print(f"整体雷达风险: {radar_label(data.get('radar_result'))}")
     print(f"共找到 {len(items)} 条相似版权画作\n")
     for i, item in enumerate(items[:20], 1):
-        sim = float(item.get("similarity") or item.get("cosine") or 0)
-        if isinstance(sim, str): sim = float(sim)
-        risk = "🔴高风险" if sim > 0.8 else ("🟡中风险" if sim > 0.5 else "🟢低风险")
-        radar_info = f" [雷达:{item.get('sub_radar_result')}]" if item.get("sub_radar_result") else ""
+        similarity = item.get("similarity")
+        sim = float(similarity if similarity is not None else item.get("cosine") or 0)
+        radar = item.get("sub_radar_result")
+        high_risk = sim > 0.8 or (enable_radar and normalize_radar(radar) is True)
+        risk = "🔴高风险" if high_risk else ("🟡中风险" if sim > 0.5 else "🟢低风险")
+        radar_info = f" [雷达:{radar_label(radar)}]" if enable_radar else ""
         tro = " [TRO维权人]" if item.get("tro_holder") else ""
         print(f"{i}. {risk}{radar_info}{tro}")
         print(f"   相似度: {sim:.4f} | 权利人: {item.get('rights_owner', '')}")
-        print(f"   版权标识码: {item.get('copyright_code', '')}")
+        print(f"   版权标识码: {item.get('copyright_code', item.get('design_code', ''))}")
         if item.get("path"):
             print(f"   版权画图片: {item.get('path')}")
         print()
     if len(items) > 20:
         print(f"... 还有 {len(items) - 20} 条结果未显示，使用 --json 查看完整结果")
 
-    show_actual_deduct("c001", enable_radar)
 
 # ── P001 纯图检测 ──────────────────────────────────────────────
 
 def cmd_p001(args, token):
-    # 展示预扣点
-    show_pre_deduct("p001")
 
-    img_b64 = load_image(args.image)
-    result = api_call(token, "policy-compliance/v1/gun-parts-search",
+    img_b64 = load_image(args.image, offline=args.dry_run or bool(args.mock_response))
+    result = perform_request(args, token, "policy-compliance/v1/gun-parts-search",
                       {"base64_image": img_b64, "type": ["gun_parts"]})
 
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
-        show_actual_deduct("p001")
         return
-    if not result.get("success"):
-        print(f"API 错误 [{result.get('code')}]: {result.get('message')}")
-        sys.exit(1)
 
     items = result.get("data", {}).get("list", [])
     # API 可能返回字符串消息而非对象列表
@@ -465,34 +482,18 @@ def cmd_p001(args, token):
     if any(float(it.get("cosine", 0)) >= 0.4 for it in real_items):
         print("建议: 存在高相似度违规产品，建议继续使用 p002 确认具体违反的政策")
 
-    show_actual_deduct("p001")
 
 # ── P002 纯文本检测 ────────────────────────────────────────────
 
 def cmd_p002(args, token):
-    # 展示预扣点和检测站点（图文同时入参仍为5点，不分开计费）
-    sites = args.sites if args.sites else ["us"]
-    show_default_regions("p002", sites)
-    extra = "（图文同时入参检测仍为 5 点）" if args.feature_image else ""
-    show_pre_deduct("p002", extra_info=extra)
-
-    # 解析用户输入的 JSON 参数，带异常处理
-    try:
-        platform_sites = json.loads(args.platform_sites) if args.platform_sites else {"amazon": args.sites}
-    except json.JSONDecodeError as e:
-        print(f"错误: --platform-sites 参数 JSON 格式无效: {e}")
-        sys.exit(1)
-
-    try:
-        feature_word_ids = json.loads(args.feature_word_ids) if args.feature_word_ids else []
-    except json.JSONDecodeError as e:
-        print(f"错误: --feature-word-ids 参数 JSON 格式无效: {e}")
-        sys.exit(1)
+    platform_sites = args.platform_sites
+    feature_word_ids = args.feature_word_ids
+    print(f"📍 检测平台站点: {json.dumps(platform_sites, ensure_ascii=False)}", file=sys.stderr)
 
     payload = {
         "product_title": args.title,
         "product_description": args.description or "",
-        "product_title_suspected": args.suspected or "",
+        "product_title_suspected": [args.suspected] if args.suspected else [],
         "platform_sites": platform_sites,
         "feature_detect": {
             "enable": args.enable_feature,
@@ -505,20 +506,15 @@ def cmd_p002(args, token):
     if args.type:
         payload["type"] = args.type
 
-    result = api_call(token, "policy-compliance/v1/detection", payload, timeout=60)
+    result = perform_request(args, token, "policy-compliance/v1/detection", payload, timeout=60)
 
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
-        show_actual_deduct("p002")
         return
-    if not result.get("success"):
-        print(f"API 错误 [{result.get('code')}]: {result.get('message')}")
-        sys.exit(1)
 
     items = result.get("data", {}).get("list", [])
     if not items:
         print("未检测到政策合规风险")
-        show_actual_deduct("p002")
         return
 
     print(f"检测到 {len(items)} 条政策匹配:\n")
@@ -538,18 +534,14 @@ def cmd_p002(args, token):
             print(f"   原因: {item.get('reason')}")
         print()
 
-    show_actual_deduct("p002")
 
 # ── P004-P007 风险特征词管理 ───────────────────────────────────
 
 def cmd_p004(args, token):
-    result = api_call(token, "policy-compliance/feature/v1/suggestion", {"word": args.word}, timeout=30)
+    result = perform_request(args, token, "policy-compliance/feature/v1/suggestion", {"word": args.word}, timeout=30)
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return
-    if not result.get("success"):
-        print(f"API 错误: {result.get('message')}")
-        sys.exit(1)
     data = result.get("data", {})
     status_labels = {-2: "含糊无关", -1: "已够清晰，可直接保存", 0: "已匹配出多个清晰词"}
     print(f"状态: {status_labels.get(data.get('status', 0), data.get('status'))}")
@@ -558,34 +550,25 @@ def cmd_p004(args, token):
         print(f"联想词: {', '.join(words)}")
 
 def cmd_p005(args, token):
-    result = api_call(token, "policy-compliance/feature/v1/save", {"word": args.word}, timeout=30)
+    result = perform_request(args, token, "policy-compliance/feature/v1/save", {"word": args.word}, timeout=30)
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return
-    if not result.get("success"):
-        print(f"API 错误: {result.get('message')}")
-        sys.exit(1)
     print(f"保存成功，ID: {result.get('data', {}).get('id')}")
 
 def cmd_p006(args, token):
-    result = api_call(token, "policy-compliance/feature/v1/delete", {"id": args.id}, timeout=30)
+    result = perform_request(args, token, "policy-compliance/feature/v1/delete", {"id": args.id}, timeout=30)
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return
-    if not result.get("success"):
-        print(f"API 错误: {result.get('message')}")
-        sys.exit(1)
     print(f"删除成功，ID: {result.get('data', {}).get('id')}")
 
 def cmd_p007(args, token):
-    result = api_call(token, "policy-compliance/feature/v1/list",
+    result = perform_request(args, token, "policy-compliance/feature/v1/list",
                       {"per_page": args.per_page, "page": args.page}, timeout=30)
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return
-    if not result.get("success"):
-        print(f"API 错误: {result.get('message')}")
-        sys.exit(1)
     data = result.get("data", {})
     items = data.get("data", [])
     print(f"共 {data.get('total', 0)} 条特征词 (第{args.page}页):\n")
@@ -596,8 +579,71 @@ def cmd_p007(args, token):
 
 # ── 主入口 ─────────────────────────────────────────────────────
 
-def main():
-    import argparse
+def bounded_int(minimum, maximum=None):
+    def parse(value):
+        try:
+            number = int(value)
+        except ValueError as exc:
+            raise argparse.ArgumentTypeError(f"{value!r} 不是整数") from exc
+        if number < minimum or (maximum is not None and number > maximum):
+            limit = f"{minimum}-{maximum}" if maximum is not None else f">= {minimum}"
+            raise argparse.ArgumentTypeError(f"{value!r} 超出范围，要求 {limit}")
+        return number
+    return parse
+
+
+def parse_json(value, option):
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise CLIError(f"{option} JSON 格式无效：{exc}") from exc
+
+
+def validate_args(args):
+    limits = {
+        "i001": {"title": 500, "description": 30000},
+        "t001": {"title": 300, "text": 5000},
+        "t002": {"title": 300, "text": 5000},
+        "p002": {"title": 300, "description": 5000},
+    }
+    for field, limit in limits.get(args.command, {}).items():
+        if len(getattr(args, field)) > limit:
+            raise CLIError(f"--{field} 长度 {len(getattr(args, field))} 超过最大 {limit} 字符")
+    required = {
+        "i001": ("title", "description"), "t001": ("title",),
+        "t002": ("title", "text", "trademark"), "p002": ("title",),
+        "p004": ("word",), "p005": ("word",),
+    }
+    for field in required.get(args.command, ()):
+        if not getattr(args, field).strip():
+            raise CLIError(f"{field} 不能为空或仅含空格")
+    if args.command == "p002":
+        sites = parse_json(args.platform_sites, "--platform-sites") if args.platform_sites else {"amazon": args.sites}
+        if not isinstance(sites, dict) or not sites:
+            raise CLIError("--platform-sites 必须是非空对象，例如 {\"amazon\":[\"us\"]}")
+        for platform, values in sites.items():
+            if not platform.strip() or not isinstance(values, list) or not values:
+                raise CLIError("--platform-sites 的平台名和站点数组均不能为空")
+            for site in values:
+                if not isinstance(site, str) or site.lower() not in SUPPORTED_SITES:
+                    raise CLIError(f"--platform-sites 不支持站点 {site!r}；支持 {', '.join(SUPPORTED_SITES)}")
+            sites[platform] = [site.lower() for site in values]
+        args.platform_sites = sites
+        ids = parse_json(args.feature_word_ids, "--feature-word-ids") if args.feature_word_ids else []
+        if not isinstance(ids, list) or any(type(value) is not int or value <= 0 for value in ids):
+            raise CLIError("--feature-word-ids 必须是正整数 ID 数组，例如 [123, 456]")
+        if len(ids) != len(set(ids)):
+            raise CLIError("--feature-word-ids 不能包含重复 ID")
+        if (ids or args.feature_image) and not args.enable_feature:
+            raise CLIError("--feature-word-ids / --feature-image 需要 --enable-feature")
+        if args.enable_feature and not ids:
+            raise CLIError("--enable-feature 需要至少一个 --feature-word-ids 中的 ID")
+        if args.suspected and not args.type:
+            raise CLIError("--suspected 需要 --type，例如 --type gun_parts")
+        args.feature_word_ids = ids
+
+
+def build_parser():
     parser = argparse.ArgumentParser(
         description="睿观 ERiC 合规检测套件",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -620,16 +666,17 @@ def main():
     # D001
     d = sub.add_parser("d001", help="D001 外观专利检测")
     d.add_argument("image", help="图片来源: 文件路径 / URL / base64字符串")
-    d.add_argument("--regions", nargs="+", default=["US"], help="国家代码 (默认 US)")
-    d.add_argument("--top", type=int, default=50, help="召回数量 1-500 (默认 50)")
+    d.add_argument("--regions", nargs="+", type=str.upper, choices=SUPPORTED_REGIONS["d001"], default=["US"], help="国家代码 (默认 US)")
+    d.add_argument("--top", type=bounded_int(1, 500), default=50, help="召回数量 1-500 (默认 50)")
     d.add_argument("--mode", choices=["hybrid", "physical", "line"], default="hybrid", help="检索模式")
     d.add_argument("--title", default="", help="产品标题")
     d.add_argument("--description", default="", help="产品描述")
-    d.add_argument("--enable-radar", action="store_true", default=True, help="开启雷达分析（默认开启）")
-    d.add_argument("--no-radar", action="store_true", help="关闭雷达分析")
+    d_radar = d.add_mutually_exclusive_group()
+    d_radar.add_argument("--enable-radar", action="store_true", default=True, help="开启雷达分析（默认开启）")
+    d_radar.add_argument("--no-radar", action="store_true", help="关闭雷达分析")
     d.add_argument("--no-tro", action="store_true", help="关闭TRO增强")
     d.add_argument("--loc", nargs="+", default=None, help="LOC分类范围")
-    d.add_argument("--patent-status", nargs="+", type=int, default=[], help="专利有效性 (1=有效, 0=失效)")
+    d.add_argument("--patent-status", nargs="+", type=int, choices=[0, 1], default=[], help="专利有效性 (1=有效, 0=失效)")
     d.add_argument("--lang", default="", help="原文语言代码")
     d.add_argument("--json", action="store_true", help="输出原始JSON")
 
@@ -637,27 +684,28 @@ def main():
     i = sub.add_parser("i001", help="I001 发明专利检测")
     i.add_argument("--title", required=True, help="产品标题 (最大500字符)")
     i.add_argument("--description", required=True, help="产品描述 (最大30000字符)")
-    i.add_argument("--regions", nargs="+", default=["US"], help="国家代码 (当前仅 US)")
-    i.add_argument("--top", type=int, default=100, help="召回数量 1-500 (默认 100)")
+    i.add_argument("--regions", nargs="+", type=str.upper, choices=SUPPORTED_REGIONS["i001"], default=["US"], help="国家代码 (当前仅 US)")
+    i.add_argument("--top", type=bounded_int(1, 500), default=100, help="召回数量 1-500 (默认 100)")
     i.add_argument("--json", action="store_true", help="输出原始JSON")
 
     # L001
     l = sub.add_parser("l001", help="L001 图形商标检测")
     l.add_argument("image", help="图片来源: 文件路径 / URL / base64字符串")
-    l.add_argument("--top", type=int, default=20, help="召回数量 1-100 (默认 20)")
-    l.add_argument("--regions", nargs="+", default=None, help="检测国家/地区")
+    l.add_argument("--top", type=bounded_int(1, 100), default=20, help="召回数量 1-100 (默认 20)")
+    l.add_argument("--regions", nargs="+", type=str.upper, choices=SUPPORTED_REGIONS["l001"], default=None, help="检测国家/地区")
     l.add_argument("--title", default="", help="产品标题")
     l.add_argument("--trademark-name", default="", help="可能的logo名称")
     l.add_argument("--enable-localizing", action="store_true", help="开启切图")
-    l.add_argument("--enable-radar", action="store_true", default=True, help="开启雷达分析（默认开启）")
-    l.add_argument("--no-radar", action="store_true", help="关闭雷达分析")
+    l_radar = l.add_mutually_exclusive_group()
+    l_radar.add_argument("--enable-radar", action="store_true", default=True, help="开启雷达分析（默认开启）")
+    l_radar.add_argument("--no-radar", action="store_true", help="关闭雷达分析")
     l.add_argument("--json", action="store_true", help="输出原始JSON")
 
     # T001
     t1 = sub.add_parser("t001", help="T001 文本商标检测")
     t1.add_argument("--title", required=True, help="产品标题 (最大300字符)")
     t1.add_argument("--text", default="", help="产品文本 (最大5000字符)")
-    t1.add_argument("--regions", nargs="+", default=["US"], help="国家/地区 (默认 US)")
+    t1.add_argument("--regions", nargs="+", type=str.upper, choices=SUPPORTED_REGIONS["t001"], default=["US"], help="国家/地区 (默认 US)")
     t1.add_argument("--auto-safe-words", action="store_true", help="自动为高风险词获取替换词")
     t1.add_argument("--json", action="store_true", help="输出原始JSON")
 
@@ -671,9 +719,10 @@ def main():
     # C001
     c = sub.add_parser("c001", help="C001 版权检测")
     c.add_argument("image", help="图片来源: 文件路径 / URL / base64字符串")
-    c.add_argument("--top", type=int, default=100, help="召回数量 1-200 (默认 100)")
-    c.add_argument("--enable-radar", action="store_true", default=True, help="开启雷达检测（默认开启，+1点）")
-    c.add_argument("--no-radar", action="store_true", help="关闭雷达检测")
+    c.add_argument("--top", type=bounded_int(1, 200), default=100, help="召回数量 1-200 (默认 100)")
+    c_radar = c.add_mutually_exclusive_group()
+    c_radar.add_argument("--enable-radar", action="store_true", default=True, help="开启雷达检测（默认开启，+1点）")
+    c_radar.add_argument("--no-radar", action="store_true", help="关闭雷达检测")
     c.add_argument("--json", action="store_true", help="输出原始JSON")
 
     # P001
@@ -685,7 +734,7 @@ def main():
     p2 = sub.add_parser("p002", help="P002 政策合规-纯文本检测")
     p2.add_argument("--title", required=True, help="产品标题")
     p2.add_argument("--description", default="", help="产品描述")
-    p2.add_argument("--sites", nargs="+", default=["us"], help="国家/地区 (默认 us, 支持: br,fr,au,us,uk,jp,it,es,mx,de,ca)")
+    p2.add_argument("--sites", nargs="+", type=str.lower, choices=SUPPORTED_SITES, default=["us"], help="国家/地区 (默认 us, 支持: br,fr,au,us,uk,jp,it,es,mx,de,ca)")
     p2.add_argument("--platform-sites", default=None, help='平台国家JSON (如 \'{"amazon":["us"]}\')')
     p2.add_argument("--type", nargs="+", default=None, help="检测类型 (如 gun_parts)")
     p2.add_argument("--suspected", default="", help="疑似违规产品标题")
@@ -706,28 +755,55 @@ def main():
 
     # P006
     p6 = sub.add_parser("p006", help="P006 风险特征词删除")
-    p6.add_argument("id", type=int, help="特征词ID")
+    p6.add_argument("id", type=bounded_int(1), help="特征词ID")
     p6.add_argument("--json", action="store_true", help="输出原始JSON")
 
     # P007
     p7 = sub.add_parser("p007", help="P007 风险特征词列表")
-    p7.add_argument("--per-page", type=int, default=100, help="每页数量 (默认 100)")
-    p7.add_argument("--page", type=int, default=1, help="页码 (默认 1)")
+    p7.add_argument("--per-page", type=bounded_int(1), default=100, help="每页数量 (默认 100)")
+    p7.add_argument("--page", type=bounded_int(1), default=1, help="页码 (默认 1)")
     p7.add_argument("--json", action="store_true", help="输出原始JSON")
 
-    args = parser.parse_args()
+    for command_parser in (d, i, l, t1, t2, c, p1, p2, p4, p5, p6, p7):
+        modes = command_parser.add_mutually_exclusive_group()
+        modes.add_argument("--dry-run", action="store_true", help="离线校验并输出请求 JSON；无需 Token，不联网，不扣点")
+        modes.add_argument("--mock-response", metavar="FILE", help="使用本地响应 JSON 或响应数组；无需 Token，不联网，不扣点")
+    return parser
+
+
+def main(argv=None):
+    parser = build_parser()
+    args = parser.parse_args(argv)
     if not args.command:
         parser.print_help()
         sys.exit(1)
 
-    token = check_token()
+    try:
+        validate_args(args)
+    except CLIError as exc:
+        parser.error(str(exc))
     cmds = {
         "d001": cmd_d001, "i001": cmd_i001, "l001": cmd_l001,
         "t001": cmd_t001, "t002": cmd_t002, "c001": cmd_c001,
         "p001": cmd_p001, "p002": cmd_p002,
         "p004": cmd_p004, "p005": cmd_p005, "p006": cmd_p006, "p007": cmd_p007,
     }
-    cmds[args.command](args, token)
+    try:
+        if args.mock_response:
+            with open(args.mock_response, encoding="utf-8-sig") as f:
+                responses = json.load(f)
+            args.mock_responses = responses if isinstance(responses, list) else [responses]
+            if not args.mock_responses or any(
+                not isinstance(response, dict) or not isinstance(response.get("success"), bool)
+                for response in args.mock_responses
+            ):
+                raise CLIError("模拟响应必须是含布尔 success 字段的对象或非空对象数组。")
+        token = os.environ.get("ERIC_API_TOKEN", "").strip() if args.dry_run or args.mock_response else check_token()
+        cmds[args.command](args, token)
+    except (CLIError, OSError, ValueError) as exc:
+        print(f"错误: {exc}", file=sys.stderr)
+        return 1
+    return 0
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -1,0 +1,30 @@
+{
+  "success": true,
+  "code": 200,
+  "message": "Synthetic offline example; not a screening result",
+  "data": {
+    "id": "offline-c001",
+    "radar_result": 1,
+    "list": [
+      {
+        "similarity": 0.25,
+        "copyright_code": "OFFLINE-001",
+        "rights_owner": "Example rights holder",
+        "sub_radar_result": 1,
+        "tro_holder": false
+      },
+      {
+        "similarity": 0.1,
+        "copyright_code": "OFFLINE-002",
+        "rights_owner": "Example rights holder",
+        "sub_radar_result": 0
+      },
+      {
+        "similarity": 0.1,
+        "copyright_code": "OFFLINE-003",
+        "sub_radar_result": null
+      }
+    ]
+  },
+  "request_id": "offline-c001-radar"
+}

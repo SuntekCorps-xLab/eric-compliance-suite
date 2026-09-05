@@ -10,7 +10,7 @@
 ## 注意事项
 
 1. 图片传参仅支持 base64，以数组形式传入（`img_64lis`），目前仅支持单张图片
-2. 每次调用收取 1 点费用（1 点/次）
+2. 基础检测预计 1 点/次，开启雷达预计 2 点/次；CLI 默认开启，可用 `--no-radar` 关闭。实际扣点以平台流水为准
 3. `enable_radar` 为必传参数，控制是否开启雷达风险分析
 
 ## 请求参数
@@ -48,6 +48,7 @@
 |-----------|------|-------------|
 | `id` | int | 检测记录 ID |
 | `list` | array | 版权画结果列表 |
+| `radar_result` | integer / string / null | 整体雷达结果，语义见下文 |
 
 ### data.list[]
 
@@ -58,9 +59,14 @@
 | `rights_owner` | string | 权利人 |
 | `link` | string | 版权官网链接 |
 | `design_url` | string | 版权画来源页面 |
-| `design_code` | string | 版权标识码 |
-| `cosine` | float | 相似度（0-1） |
-| `cas_risk` | string | 风险等级（null=未进行雷达检测，如需请使用 C002 接口） |
+| `copyright_code` | string | 版权标识码 |
+| `similarity` | number / string | 相似度（0-1） |
+| `sub_radar_result` | integer / string / null | 条目雷达结果，语义见下文 |
+| `tro_holder` | boolean | 是否为 TRO 维权人 |
+
+当前 C001 通过 `enable_radar` 集成雷达，无需额外调用 C002。整体和条目雷达均按以下规则解析：`1`、`"1"`、`"high_risk"` 为高风险；`0`、`"0"`、`"low_risk"` 为未标记高风险；`null`、缺失或未知值表示未分析/未知，不能当作无风险。数字语义及字段见 [2026-09-04 验证记录](https://github.com/SuntekCorps-xLab/eric-compliance-suite/issues/6)。
+
+CLI 在 `similarity > 0.8` 或启用雷达且条目雷达为正时展示高风险；整体雷达独立展示，不将整体高风险分配给每条结果。旧版 `cosine`、`design_code` 仅作为兼容字段。合成契约样例见 [c001-radar.json](../tests/fixtures/c001-radar.json)。
 
 ## 错误码
 
@@ -123,6 +129,7 @@
   "message": "success",
   "data": {
     "id": "748955404365561856",
+    "radar_result": 1,
     "list": [
       {
         "path": "https://eric-oss-image.oss-cn-shenzhen.aliyuncs.com/copyright/redbubble/design/104108784.jpg",
@@ -131,9 +138,9 @@
         "link": "https://www.redbubble.com",
         "design_url": "https://www.redbubble.com/shop/ap/104108784",
         "note": null,
-        "design_code": "RB104108784",
-        "cosine": 0.6254262924194336,
-        "cas_risk": null
+        "copyright_code": "RB104108784",
+        "similarity": 0.6254262924194336,
+        "sub_radar_result": 1
       },
       {
         "path": "https://eric-oss-image.oss-cn-shenzhen.aliyuncs.com/copyright/redbubble/design/92914010.jpg",
@@ -142,9 +149,9 @@
         "link": "https://www.redbubble.com",
         "design_url": "https://www.redbubble.com/shop/ap/92914010",
         "note": null,
-        "design_code": "RB92914010",
-        "cosine": 0.5950914621353149,
-        "cas_risk": null
+        "copyright_code": "RB92914010",
+        "similarity": 0.5950914621353149,
+        "sub_radar_result": null
       }
     ]
   },
