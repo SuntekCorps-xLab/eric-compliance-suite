@@ -185,6 +185,8 @@ python3 scripts/detect.py p001 tests/fixtures/sample.png --mock-response tests/f
 
 A dry run validates inputs and prints JSON containing the target URL, request payload (including encoded images), redacted authentication header, estimated live cost and `points_consumed: 0`. A mock exercises the normal response renderer. These modes verify local wiring; they do not verify token validity or server-side acceptance. See [the offline integration contract](references/offline-testing.md) for expected JSON, mock failures and regression checks.
 
+Targeted live checks, actual point deductions, and the boundary between live and offline coverage are recorded in the [2026-09-05 verification report](reports/2026-09-05-live-verification.md).
+
 ### Point usage
 
 ERiC API calls may consume points from your account. The CLI prints locally calculated estimates before and after a check; it does not query the account ledger. The final debit shown by the ERiC platform is authoritative.
@@ -200,6 +202,8 @@ ERiC API calls may consume points from your account. The CLI prints locally calc
 | P001 policy image | 1 | — | Currently screens gun-parts imagery |
 | P002 policy text | 5 + 2 per custom term | — | 5 base points plus 2 for each enabled custom term |
 | P004–P007 custom risk terms | 0 | — | Management operations; P004 has a separate daily limit of 50 calls |
+
+P002 feature detection requires both `--feature-word-ids` (ready saved terms) and a nonempty `--feature-image` URL together with `--enable-feature`.
 
 P004–P007 had zero observed point cost in the [2026-09-04 integration checks](https://github.com/SuntekCorps-xLab/eric-compliance-suite/issues/13). This is separate from P002 feature detection, which costs 2 points per selected term. Failed requests and timeouts do not confirm a debit; the CLI does not retry automatically.
 
@@ -437,6 +441,8 @@ python3 scripts/detect.py p001 tests/fixtures/sample.png --mock-response tests/f
 
 试运行会校验参数，并以 JSON 输出目标 URL、请求体（含图片编码）、脱敏认证头、真实调用时的预估点数及 `points_consumed: 0`。模拟模式使用正常结果展示逻辑。这些模式验证本地接入流程，不验证 Token 有效性或服务端是否接受请求。预期 JSON、模拟错误及回归检查见[离线接入说明](references/offline-testing.md)。
 
+针对性实测、实际扣点和实测/离线覆盖边界见 [2026-09-05 验证报告](reports/2026-09-05-live-verification.md)。
+
 ### 扣点说明
 
 ERiC API 调用可能消耗账户点数。CLI 会在检测前后显示本地计算的扣点估值，但不会查询账户点数流水；最终应以 ERiC 平台显示的实际扣点为准。
@@ -452,6 +458,8 @@ ERiC API 调用可能消耗账户点数。CLI 会在检测前后显示本地计�
 | P001 政策图片 | 1 | — | 当前检测枪械配件图片 |
 | P002 政策文本 | 5 + 每个特征词 2 点 | — | 5 点基础费用 + 每个启用特征词 2 点 |
 | P004–P007 风险特征词 | 0 | — | 管理操作；P004 另有每日 50 次调用限制 |
+
+P002 开启 `--enable-feature` 时，必须同时传入 `--feature-word-ids`（已就绪的特征词）及非空 `--feature-image` 图片 URL。
 
 P004–P007 的 0 点规则依据 [2026-09-04 接入验证](https://github.com/SuntekCorps-xLab/eric-compliance-suite/issues/13)；P002 执行特征词检测才按每个选中词额外收取 2 点。请求失败或超时不能确认是否扣费，CLI 不自动重试。
 

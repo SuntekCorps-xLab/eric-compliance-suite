@@ -121,9 +121,11 @@ P004-P007 的零点数依据 [2026-09-04 接入验证](https://github.com/Suntek
 | `enable` | boolean | true | 是否开启风险特征词检测 |
 | `features` | object | false | 配置对象，包含下列两个字段 |
 | `features.feature_word_ids` | array | false | P007 中已保存的正整数 ID 列表 |
-| `features.image` | string | false | 产品图片 URL，用于特征词图文联合检测 |
+| `features.image` | string | enable=true 时必填 | 产品图片 URL；开启特征词检测时不能为空 |
 
-CLI 的 `--sites` 支持 br, fr, au, us, uk, jp, it, es, mx, de, ca（英国为 `uk`）。`--platform-sites` 必须是非空对象，值为非空站点数组。`--enable-feature` 需要非空 `--feature-word-ids` 正整数数组；ID 不得重复。传入特征词或图片时必须同时启用 `--enable-feature`。`--suspected` 需配合 `--type`，会转成单元素标题数组。
+CLI 的 `--sites` 支持 br, fr, au, us, uk, jp, it, es, mx, de, ca（英国为 `uk`）。`--platform-sites` 必须是非空对象，值为非空站点数组。`--enable-feature` 需要非空 `--feature-word-ids` 正整数数组和 `--feature-image` 图片 URL；ID 不得重复。传入特征词或图片时必须同时启用 `--enable-feature`。`--suspected` 需配合 `--type`，会转成单元素标题数组。
+
+2026-09-05 实测确认：开启特征检测但缺少图片会返回 `4000001 feature_detect.features.image不能为空`；完整入参成功，实际扣点为 7 点（一个特征词）。参见[实测记录](../reports/2026-09-05-live-verification.md)。
 
 ### 请求示例
 

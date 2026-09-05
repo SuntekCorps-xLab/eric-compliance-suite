@@ -161,12 +161,26 @@ class RequestLifecycleTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual(json.loads(output)["estimated_points"], points)
             self.assertFalse(json.loads(output)["payload"]["enable_radar"])
-        code, output, error, _ = invoke(COMMANDS["p002"] + ["--enable-feature", "--feature-word-ids", "[12, 34]", "--dry-run"])
+        code, output, error, _ = invoke(COMMANDS["p002"] + ["--enable-feature", "--feature-word-ids", "[12, 34]", "--feature-image", "https://example.com/lamp.jpg", "--dry-run"])
         self.assertEqual(code, 0, error)
         self.assertEqual(json.loads(output)["estimated_points"], 9)
 
 
 class ValidationTests(unittest.TestCase):
+    def test_feature_detection_requires_image_before_network(self):
+        argv = COMMANDS["p002"] + ["--enable-feature", "--feature-word-ids", "[12]"]
+        for image_args in ([], ["--feature-image", "   "]):
+            code, output, error, api = invoke(argv + image_args, token="")
+            self.assertEqual(code, 2, error)
+            self.assertEqual(output, "")
+            self.assertIn("--feature-image", error)
+            api.assert_not_called()
+        code, output, error, api = invoke(argv + ["--feature-image", "https://example.com/lamp.jpg", "--dry-run"], token="")
+        self.assertEqual(code, 0, error)
+        features = json.loads(output)["payload"]["feature_detect"]["features"]
+        self.assertEqual(features, {"feature_word_ids": [12], "image": "https://example.com/lamp.jpg"})
+        api.assert_not_called()
+
     def test_invalid_inputs_fail_before_any_api_call(self):
         invalid = [
             ["t001", "--title", "x" * 301], ["t001", "--title", "   "],

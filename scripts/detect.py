@@ -638,6 +638,8 @@ def validate_args(args):
             raise CLIError("--feature-word-ids / --feature-image 需要 --enable-feature")
         if args.enable_feature and not ids:
             raise CLIError("--enable-feature 需要至少一个 --feature-word-ids 中的 ID")
+        if args.enable_feature and not args.feature_image.strip():
+            raise CLIError("--enable-feature 需要 --feature-image 图片 URL")
         if args.suspected and not args.type:
             raise CLIError("--suspected 需要 --type，例如 --type gun_parts")
         args.feature_word_ids = ids

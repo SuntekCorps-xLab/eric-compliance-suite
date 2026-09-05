@@ -51,7 +51,7 @@ Expected JSON when no token is configured (the image value below is abbreviated)
 
 `payload` is the same JSON object that a live call would POST. The real preview includes the entire encoded image; keep it in a file rather than loading it into an agent conversation. With a configured token, `token_configured` is `true` and `headers.Token` is always `<redacted>`. No credential value is printed. Only live requests use the actual token in the `Token` header.
 
-`estimated_points` describes the cost of a **live** request. P002 includes 2 points per enabled feature ID. For `t001 --auto-safe-words`, the dry run describes the variable per-term T002 cost under `follow_up`; it cannot know the number of terms before receiving a T001 response.
+`estimated_points` describes the cost of a **live** request. P002 includes 2 points per enabled feature ID. Enabling feature detection requires both a nonempty ID array and `--feature-image` URL, matching the live service contract. For `t001 --auto-safe-words`, the dry run describes the variable per-term T002 cost under `follow_up`; it cannot know the number of terms before receiving a T001 response.
 
 试运行复用真实请求构造逻辑，实际输出包含完整图片编码；Agent 应在代码环境中提取摘要，不把图片编码读入对话。预估费用是真实调用时的费用，当前试运行费用始终为 0；此模式只检查认证配置是否存在，不证明 Token 有效或服务端接受参数。
 
