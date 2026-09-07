@@ -24,8 +24,8 @@ def load_followups(path):
     seen = set()
     for comment in comments:
         issue, body = comment.get("issue"), comment.get("body")
-        if type(issue) is not int or not 1 <= issue <= 16 or issue in seen:
-            raise ValueError("Issue numbers must be unique integers from 1 through 16")
+        if type(issue) is not int or not 1 <= issue <= 17 or issue in seen:
+            raise ValueError("Issue numbers must be unique integers from 1 through 17")
         if not isinstance(body, str) or not body.strip() or len(body) > 60000:
             raise ValueError("Each comment needs a nonempty body under 60,000 characters")
         seen.add(issue)

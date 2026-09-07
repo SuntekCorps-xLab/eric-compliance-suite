@@ -34,7 +34,7 @@ class FollowupTests(unittest.TestCase):
     def test_validation_rejects_duplicate_or_out_of_scope_issues(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "comments.json"
-            for comments in ([{"issue": 17, "body": "text"}], [{"issue": 1, "body": "text"}] * 2):
+            for comments in ([{"issue": 18, "body": "text"}], [{"issue": 1, "body": "text"}] * 2):
                 path.write_text(json.dumps({"repository": followups.REPOSITORY, "comments": comments}), encoding="utf-8")
                 with self.assertRaises(ValueError):
                     followups.load_followups(path)

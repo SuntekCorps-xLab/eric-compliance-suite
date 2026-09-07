@@ -123,7 +123,18 @@ P004-P007 的零点数依据 [2026-09-04 接入验证](https://github.com/Suntek
 | `features.feature_word_ids` | array | false | P007 中已保存的正整数 ID 列表 |
 | `features.image` | string | enable=true 时必填 | 产品图片 URL；开启特征词检测时不能为空 |
 
-CLI 的 `--sites` 支持 br, fr, au, us, uk, jp, it, es, mx, de, ca（英国为 `uk`）。`--platform-sites` 必须是非空对象，值为非空站点数组。`--enable-feature` 需要非空 `--feature-word-ids` 正整数数组和 `--feature-image` 图片 URL；ID 不得重复。传入特征词或图片时必须同时启用 `--enable-feature`。`--suspected` 需配合 `--type`，会转成单元素标题数组。
+CLI 的 `--sites` 仅配置 Amazon，支持 br, fr, au, us, uk, jp, it, es, mx, de, ca（英国为 `uk`），默认 `us`。
+
+`--platform-sites` 覆盖 `--sites`，必须是非空对象，平台名为非空字符串，值为包含非空字符串的非空站点数组。站点代码转为小写，平台键保留原值。Amazon 的站点列表同样用于 JSON 输入，匹配平台名时忽略大小写及两端空白；其他平台不套用 Amazon 列表，由服务端判断站点是否支持。CLI 暂未维护其他平台的完整站点列表，因此试运行通过只说明本地输入结构有效。
+
+2026-09-07 独立实测确认 `{"tiktok":["sg"]}` 返回了 TikTok / SG 政策记录，见 [issue #17 验证记录](../reports/2026-09-07-issue-17-verification.md)。该证据仅覆盖 TikTok SG，没有推断 TikTok 的完整站点范围或其他平台支持情况。
+
+```bash
+python3 scripts/detect.py p002 --title "Wireless earbuds with charging case" \
+  --platform-sites '{"tiktok":["SG"]}' --dry-run
+```
+
+`--enable-feature` 需要非空 `--feature-word-ids` 正整数数组和 `--feature-image` 图片 URL；ID 不得重复。传入特征词或图片时必须同时启用 `--enable-feature`。`--suspected` 需配合 `--type`，会转成单元素标题数组。
 
 2026-09-05 实测确认：开启特征检测但缺少图片会返回 `4000001 feature_detect.features.image不能为空`；完整入参成功，实际扣点为 7 点（一个特征词）。参见[实测记录](../reports/2026-09-05-live-verification.md)。
 
