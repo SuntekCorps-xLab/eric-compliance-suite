@@ -167,6 +167,64 @@ class RequestLifecycleTests(unittest.TestCase):
 
 
 class ValidationTests(unittest.TestCase):
+    def test_p002_platform_sites_do_not_inherit_amazon_allowlist(self):
+        for platforms in ({"tiktok": ["SG"]}, {"tikTok": ["SG"]},
+                          {"amazon": ["US", "UK"], "tiktok": ["SG"]}):
+            with self.subTest(platforms=platforms):
+                argv = COMMANDS["p002"] + ["--platform-sites", json.dumps(platforms)]
+                code, output, error, api = invoke(argv + ["--dry-run"], token="")
+                self.assertEqual(code, 0, error)
+                api.assert_not_called()
+                preview = json.loads(output)
+                expected = {platform: [site.lower() for site in sites]
+                            for platform, sites in platforms.items()}
+                self.assertEqual(preview["payload"]["platform_sites"], expected)
+                self.assertEqual(preview["estimated_points"], 5)
+                self.assertEqual(preview["points_consumed"], 0)
+                code, _, error, api = invoke(argv + ["--json"])
+                self.assertEqual(code, 0, error)
+                api.assert_called_once_with("test-secret", PATHS["p002"], preview["payload"], 60)
+
+    def test_p002_amazon_site_rejection_is_platform_specific(self):
+        invalid = [
+            {platform: [site]} for platform in ("amazon", "Amazon", "AMAZON", " Amazon ")
+            for site in ("SG", "sg", "gb", "ZZ")
+        ] + [{"amazon": ["SG"], "tiktok": ["SG"]}]
+        for platforms in invalid:
+            with self.subTest(platforms=platforms):
+                with mock.patch.object(detect, "check_token", side_effect=AssertionError("Unexpected token access")):
+                    code, output, error, api = invoke(
+                        COMMANDS["p002"] + ["--platform-sites", json.dumps(platforms)], token="")
+                self.assertEqual(code, 2, error)
+                self.assertEqual(output, "")
+                self.assertIn("不支持站点", error)
+                api.assert_not_called()
+        code, _, error, api = invoke(COMMANDS["p002"] + ["--sites", "SG"], token="")
+        self.assertEqual(code, 2, error)
+        api.assert_not_called()
+
+    def test_p002_unlisted_platform_support_is_left_to_api(self):
+        for platforms in ({"tiktok": ["ZZ"]}, {"custom": ["US"]}):
+            code, output, error, api = invoke(
+                COMMANDS["p002"] + ["--platform-sites", json.dumps(platforms), "--json"], FAILURE)
+            self.assertEqual(code, 1, error)
+            self.assertEqual(json.loads(output), FAILURE)
+            self.assertNotIn("调用完成", error)
+            api.assert_called_once()
+
+    def test_p002_platform_site_structure_is_validated_before_auth(self):
+        invalid = [{platform: value} for platform in ("amazon", "tiktok", "custom")
+                   for value in (None, "sg", {}, [], [None], [True], [17], [{}], [[]], [""], ["   "])]
+        invalid += [{"": ["sg"]}, {"   ": ["sg"]}]
+        for platforms in invalid:
+            with self.subTest(platforms=platforms):
+                with mock.patch.object(detect, "check_token", side_effect=AssertionError("Unexpected token access")):
+                    code, output, error, api = invoke(
+                        COMMANDS["p002"] + ["--platform-sites", json.dumps(platforms)], token="")
+                self.assertEqual(code, 2, error)
+                self.assertEqual(output, "")
+                api.assert_not_called()
+
     def test_feature_detection_requires_image_before_network(self):
         argv = COMMANDS["p002"] + ["--enable-feature", "--feature-word-ids", "[12]"]
         for image_args in ([], ["--feature-image", "   "]):

@@ -167,6 +167,15 @@ python3 scripts/detect.py p002 \
   --sites us uk
 ```
 
+`--sites` selects Amazon sites only. For TikTok Singapore, use `--platform-sites` instead:
+
+```bash
+python3 scripts/detect.py p002 --title "Wireless earbuds with charging case" \
+  --platform-sites '{"tiktok":["sg"]}' --dry-run
+```
+
+TikTok SG has been [verified against the live API](reports/2026-09-07-issue-17-verification.md). Other platforms do not inherit Amazon's site list; the CLI validates their input structure and the API decides support. A successful dry run does not verify server support. See [the policy reference](references/policy-detection.md).
+
 Every subcommand supports `--json` for the complete API response on stdout; progress and point estimates go to stderr. Failed API responses exit nonzero. `t001 --json` returns only the T001 response and does not run `--auto-safe-words` follow-ups. To view all options for a command:
 
 ```bash
@@ -422,6 +431,15 @@ python3 scripts/detect.py p002 \
   --description "Product description" \
   --sites us uk
 ```
+
+`--sites` 仅选择 Amazon 站点。检测 TikTok 新加坡站请改用 `--platform-sites`：
+
+```bash
+python3 scripts/detect.py p002 --title "Wireless earbuds with charging case" \
+  --platform-sites '{"tiktok":["sg"]}' --dry-run
+```
+
+TikTok SG 已通过[真实 API 验证](reports/2026-09-07-issue-17-verification.md)。其他平台不套用 Amazon 站点列表；CLI 校验输入结构，由 API 决定是否支持。试运行成功不代表服务端支持，详见[政策参考](references/policy-detection.md)。
 
 所有子命令都支持 `--json`，标准输出仅含完整 API 响应，进度和扣点估值写入标准错误；API 失败时退出码非零。`t001 --json` 仅输出 T001 响应，不执行 `--auto-safe-words` 后续调用。运行以下命令查看某个接口的全部参数：
 

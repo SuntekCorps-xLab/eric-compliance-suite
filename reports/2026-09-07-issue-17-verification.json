@@ -1,0 +1,49 @@
+{
+  "date": "2026-09-07",
+  "started_at_utc": "2026-09-07T05:49:28.643780+00:00",
+  "finished_at_utc": "2026-09-07T05:49:36.276380+00:00",
+  "issue": 17,
+  "baseline_commit": "901bf12cfc6d2acfcca308c636cc10a036e3d030",
+  "tested_code": "working tree P002 platform validation fix",
+  "python": "3.12.0",
+  "requests_sent": 1,
+  "automatic_retries": 0,
+  "redirects_allowed": false,
+  "request": {
+    "method": "POST",
+    "url": "https://saas.eric-bot.com/v1.0/eric-api/policy-compliance/v1/detection",
+    "payload": {
+      "product_title": "Wireless earbuds with charging case",
+      "product_description": "Portable Bluetooth earbuds with noise reduction and USB-C charging.",
+      "product_title_suspected": [],
+      "platform_sites": {
+        "tiktok": [
+          "sg"
+        ]
+      },
+      "feature_detect": {
+        "enable": false,
+        "features": {
+          "feature_word_ids": [],
+          "image": ""
+        }
+      }
+    },
+    "http_status": 200,
+    "response_sha256": "1a22c661688e1706f5662e513f524a0d8689b006726920c4dd562cea8a805f82"
+  },
+  "cli_exit_code": 0,
+  "success": true,
+  "code": 200,
+  "request_id": "20260907134929-KoaSvneWa2zxWfn1",
+  "policy_record_count": 8,
+  "returned_platform_sites": [
+    {
+      "platform": "Tiktok",
+      "site": "SG"
+    }
+  ],
+  "estimated_points": 5,
+  "actual_points": null,
+  "billing_ledger_queried": false
+}

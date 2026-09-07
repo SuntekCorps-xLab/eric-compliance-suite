@@ -25,7 +25,11 @@ SUPPORTED_REGIONS = {
     "l001": tuple("US WO ES GB DE IT CA MX EM AU FR JP TR BX CN EU".split()),
     "t001": tuple("AU BX CA DE EM ES FR GB IT JP MX TR US WO CN".split()),
 }
-SUPPORTED_SITES = tuple("br fr au us uk jp it es mx de ca".split())
+# Only enforce a site allowlist where a complete platform contract is documented.
+# Other platforms still require nonempty string arrays; the API validates support.
+PLATFORM_SITE_ALLOWLISTS = {
+    "amazon": tuple("br fr au us uk jp it es mx de ca".split()),
+}
 
 
 class CLIError(Exception):
@@ -624,9 +628,15 @@ def validate_args(args):
         for platform, values in sites.items():
             if not platform.strip() or not isinstance(values, list) or not values:
                 raise CLIError("--platform-sites 的平台名和站点数组均不能为空")
+            supported_sites = PLATFORM_SITE_ALLOWLISTS.get(platform.strip().lower())
             for site in values:
-                if not isinstance(site, str) or site.lower() not in SUPPORTED_SITES:
-                    raise CLIError(f"--platform-sites 不支持站点 {site!r}；支持 {', '.join(SUPPORTED_SITES)}")
+                if not isinstance(site, str) or not site.strip():
+                    raise CLIError("--platform-sites 的站点必须是非空字符串")
+                if supported_sites is not None and site.lower() not in supported_sites:
+                    raise CLIError(
+                        f"--platform-sites 平台 {platform!r} 不支持站点 {site!r}；"
+                        f"支持 {', '.join(supported_sites)}"
+                    )
             sites[platform] = [site.lower() for site in values]
         args.platform_sites = sites
         ids = parse_json(args.feature_word_ids, "--feature-word-ids") if args.feature_word_ids else []
@@ -736,8 +746,8 @@ def build_parser():
     p2 = sub.add_parser("p002", help="P002 政策合规-纯文本检测")
     p2.add_argument("--title", required=True, help="产品标题")
     p2.add_argument("--description", default="", help="产品描述")
-    p2.add_argument("--sites", nargs="+", type=str.lower, choices=SUPPORTED_SITES, default=["us"], help="国家/地区 (默认 us, 支持: br,fr,au,us,uk,jp,it,es,mx,de,ca)")
-    p2.add_argument("--platform-sites", default=None, help='平台国家JSON (如 \'{"amazon":["us"]}\')')
+    p2.add_argument("--sites", nargs="+", type=str.lower, choices=PLATFORM_SITE_ALLOWLISTS["amazon"], default=["us"], help="Amazon 国家/地区 (默认 us)")
+    p2.add_argument("--platform-sites", default=None, help='平台站点 JSON，覆盖 --sites (如 \'{"tiktok":["sg"]}\')；其他平台的站点支持由 API 校验')
     p2.add_argument("--type", nargs="+", default=None, help="检测类型 (如 gun_parts)")
     p2.add_argument("--suspected", default="", help="疑似违规产品标题")
     p2.add_argument("--enable-feature", action="store_true", help="启用风险特征词检测")

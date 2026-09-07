@@ -229,8 +229,8 @@ T001 检测产品文本中的商标词及风险等级；T002 为高风险词生�
 - **可选参数**: `product_description`, `type`(P001有结果时传), `product_title_suspected`
 - **关键响应**: `data.list[]` 含 `prohibited`(1=禁售), `compliance`(1=限售), `reason`, `content_url`, `name`
 - **费用**: 5 + 特征词数×2 点/次（**图文同时入参检测仍为 5+2n 点**，不分开计费）
-- **默认站点**: us
-- **支持站点**: br, fr, au, us, **uk**(非gb), jp, it, es, mx, de, ca
+- **默认平台/站点**: Amazon / us；`--sites` 仅配置 Amazon，支持 br, fr, au, us, **uk**(非gb), jp, it, es, mx, de, ca
+- **其他平台**: 使用 `--platform-sites` 覆盖 `--sites`，如 `'{"tiktok":["sg"]}'`。TikTok SG 已实测返回对应政策；其他平台未维护完整站点列表，CLI 校验非空平台名和非空字符串站点数组，服务端决定是否支持。站点代码转为小写；试运行通过不表示服务端支持。详见 [政策参考](references/policy-detection.md)
 - **特征检测**: 使用 `--enable-feature` 时，必须同时提供已就绪的 `--feature-word-ids` 和非空 `--feature-image` 图片 URL；服务端实测会拒绝缺图请求
 
 ### P004-P007 风险特征词管理
