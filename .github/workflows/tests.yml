@@ -27,4 +27,14 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: python -m pip install -r requirements.txt
       - run: python -m unittest discover -s tests -v
-      - run: python -m py_compile scripts/detect.py
+      - run: python -m py_compile scripts/detect.py scripts/image_inputs.py .github/scripts/post_issue_followups.py
+      - name: Verify a public HTTPS image without calling ERiC
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from scripts.image_inputs import download_image
+          url = "https://raw.githubusercontent.com/SuntekCorps-xLab/eric-compliance-suite/2652e52a4c371add80f8e9672bbdc6d4c9abc68f/tests/fixtures/sample.png"
+          assert download_image(url) == Path("tests/fixtures/sample.png").read_bytes()
+          print("Public HTTPS image bytes verified; no ERiC API request.")
+          PY

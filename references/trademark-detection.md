@@ -47,35 +47,34 @@
 
 #### data
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `id` | integer | 接口调用 ID |
-| `trademark_list` | array | 商标词列表 |
-| `text_trademark_radar` | int | 产品风险等级：0=低风险, 1=待人工核查, 2=高风险 |
-| `blackwhitelist_trademarks` | object | 黑白名单列表 |
-
-#### data.trademark_list[]
+2026-09-05 留存实测响应使用下列字段。下面示例为按该结构构造的合成数据，不是实际商标结论。
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `trademark` | string | 商标词 |
-| `common_sense` | boolean | 是否常用词 |
-| `compatibility` | boolean | 是否兼容性用法 |
-| `active_holder` | boolean | 是否有活跃维权人 |
-| `famous` | boolean | 是否著名商标 |
-| `amazon_brand` | boolean | 是否 Amazon 热搜品牌 |
-| `status` | string | 最高分商标词状态（Active/pending/end） |
-| `mode_ns_codes` | array | 模型推荐的尼斯分类代码 |
-| `highest_mode_score` | integer | 最高风险分数（0-5） |
-| `from` | array | 原文中的出处词语 |
-| `region_score` | array | 各国家/地区风险分数：`[{region, score}]` |
+| `id` | integer | 检测 ID（示例省略） |
+| `text_trademarks` | array | 商标词列表 |
+| `text_trademark_radar` | int | 0=低风险，1=待人工核查，2=高风险 |
+| `product_nice_classes` | array | 产品尼斯分类 |
+| `blackwhitelist_trademarks` | object | `blacklist_trademarks` / `whitelist_trademarks` |
 
-#### data.blackwhitelist_trademarks
+#### data.text_trademarks[]
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `blacklist_trademarks` | array | 黑名单：`[{trademark, note, region}]` |
-| `whitelist_trademarks` | array | 白名单：`[{trademark, note, region}]` |
+| `trademark_name` | string | 商标词 |
+| `is_common_sense` | boolean | 常用词标记 |
+| `is_compatibility` | boolean | 兼容性用法标记 |
+| `is_active_holder` | boolean | 活跃维权人标记 |
+| `is_famous` | boolean | 著名商标标记 |
+| `is_amazon_brand` | boolean | Amazon 品牌标记 |
+| `status` | string | 状态 |
+| `highest_mode_score` | integer | 最高风险分数（0–5） |
+| `extra_score` | integer | 附加分数 |
+| `tro_case` | integer | TRO 案件字段，保留服务端值 |
+| `original_text_matches` | array | 原文匹配词 |
+| `region_risk_scores` | array | `[{region, risk_score, detail}]` |
+
+CLI 同时兼容旧版 `trademark_list`、`trademark`、不带 `is_` 的标记及 `region_score[].score`。同时存在两套字段时以当前字段为准，包括显式 `false`；`--json` 始终原样返回，不改写字段。字段名兼容不代表两套响应都在本轮进行过真实 API 调用。
 
 ### 响应示例
 
@@ -83,48 +82,41 @@
 {
   "success": true,
   "code": 200,
-  "message": "success",
   "data": {
-    "id": 753661385410523137,
-    "trademark_list": [
+    "text_trademark_radar": 2,
+    "product_nice_classes": [
+      "09"
+    ],
+    "text_trademarks": [
       {
-        "trademark": "summer heat",
-        "common_sense": true,
-        "compatibility": false,
-        "active_holder": false,
-        "famous": false,
-        "amazon_brand": false,
-        "status": "active",
-        "mode_ns_codes": ["17", "22", "19"],
-        "highest_mode_score": 0,
-        "from": ["Summer Heat"],
-        "region_score": [{"region": "EM", "score": 0}]
-      },
-      {
-        "trademark": "wall",
-        "common_sense": true,
-        "compatibility": false,
-        "active_holder": true,
-        "famous": false,
-        "amazon_brand": false,
-        "status": "active",
-        "mode_ns_codes": ["17", "22", "19"],
-        "highest_mode_score": 0,
-        "from": ["Wall"],
-        "region_score": [{"region": "EM", "score": 0}]
+        "trademark_name": "Example",
+        "is_common_sense": false,
+        "is_compatibility": false,
+        "is_active_holder": true,
+        "is_famous": true,
+        "is_amazon_brand": false,
+        "status": "Active",
+        "highest_mode_score": 4,
+        "extra_score": 0,
+        "tro_case": 0,
+        "original_text_matches": [
+          "Example"
+        ],
+        "region_risk_scores": [
+          {
+            "region": "US",
+            "risk_score": 4,
+            "detail": []
+          }
+        ]
       }
     ],
     "blackwhitelist_trademarks": {
-      "blacklist_trademarks": [
-        {"trademark": "summer heat", "note": "", "region": "EM"}
-      ],
-      "whitelist_trademarks": [
-        {"trademark": "along", "note": "", "region": "EM"}
-      ]
-    },
-    "text_trademark_radar": 0
+      "blacklist_trademarks": [],
+      "whitelist_trademarks": []
+    }
   },
-  "request_id": "20250227170115-G2iuGHFfNsaCdCS7"
+  "request_id": "offline-t001-example"
 }
 ```
 
@@ -329,3 +321,5 @@ resp = requests.post(
 )
 safe_words = resp.json()
 ```
+
+自动替换词流程：`t001 --auto-safe-words` 需要非空 `--text`（`--json` 不执行后续调用）。4003009/4003010 为单词级无替换结果，继续处理其余词，结束后若有失败则退出 1；认证、余额、传输等其他错误立即停止后续调用。没有自动重试。

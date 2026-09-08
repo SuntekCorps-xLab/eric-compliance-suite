@@ -57,6 +57,8 @@ Expected JSON when no token is configured (the image value below is abbreviated)
 
 Image inputs must be local files or complete base64 strings in offline mode. HTTP(S) image URLs are rejected before downloading; save the image locally first. An image URL in a P002 feature payload is left as text and is never fetched. A chat attachment works only when the runtime exposes a readable file.
 
+Use `python3 scripts/detect.py p001 tests/fixtures/sample.png --dry-run` to test image input locally. Both offline modes deliberately reject URLs, including with a configured token. Local/base64 image headers and the 20 MiB size limit are checked in both offline and live modes; there is no arbitrary minimum of hundreds of bytes. If the network maps a public hostname to a nonpublic address, the live URL downloader also rejects it; save an authorized image locally instead of disabling the address check.
+
 ## Exercise response parsing
 
 ```bash
@@ -95,12 +97,15 @@ C001 displays high risk for the item above even though similarity is only 0.25, 
 
 ## Output and exit codes
 
+Mock files must be UTF-8 JSON (BOM supported). Invalid encoding, JSON syntax, directories and unreadable paths report `--mock-response` and the affected filename. Explicit null/malformed response containers in human mode produce a diagnostic and the original response, then exit 1; they are not rendered as a clean risk result. `--json` continues to preserve the original API envelope.
+
 | Mode/result | stdout | stderr | Exit code |
 | --- | --- | --- | ---: |
 | Successful dry run | Request preview JSON | Context, if any | 0 |
 | Successful `--json` | One complete API response | Progress and estimated cost / mock notice | 0 |
 | API `success: false` with `--json` | One complete error response | Failure explanation; live debit is unconfirmed | 1 |
 | Missing token/dependency/file, transport error or invalid mock | Empty | Actionable error | 1 |
+| Human renderer receives malformed/null containers | Original response JSON | Field diagnostic; do not repeat a paid request for raw data | 1 |
 | Invalid CLI parameter/combination | Empty | Parameter error and usage | 2 |
 
 Human-readable mode writes results to stdout. `t001 --json` preserves the single T001 response and does not run `--auto-safe-words` follow-ups. All billing notices are estimates; no live ledger is queried, and failed or timed-out requests are never described as confirmed debits. There are no automatic retries.
@@ -112,4 +117,4 @@ python3 -m unittest discover -s tests -v
 python3 -m py_compile scripts/detect.py
 ```
 
-Use `py` instead of `python3` on Windows. Tests exercise every command's request payload and JSON lifecycle, parameter boundaries, missing dependency recovery, numeric copyright radar, and P001 no-match billing. HTTP is mocked and offline modes are also exercised without site packages (`python -S`), so these checks need no token and consume no ERiC points.
+Use `py` instead of `python3` on Windows. Install `requirements.txt` to include real HTTP transport tests. Tests use mocks and local HTTP servers to exercise payloads, rendering, parameter boundaries, image download limits, and error diagnostics. Offline CLI modes are also exercised without site packages (`python -S`). These tests need no token and consume no ERiC points. Linux CI separately fetches one fixed public image over HTTPS and compares its bytes, without calling ERiC.

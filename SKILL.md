@@ -1,6 +1,6 @@
 ---
 name: eric-compliance-suite
-description: 睿观(ERiC) 全功能合规检测套件。集成外观专利(D001)、发明专利(I001)、图形商标(L001)、文本商标+替换词(T001/T002)、版权(C001)、政策合规(P001-P007) 六大检测能力。当用户需要进行任何知识产权合规检测（专利、商标、版权）或电商平台政策合规审查时触发此 skill。
+description: 睿观(ERiC) 全功能合规检测套件。集成外观专利(D001)、发明专利(I001)、图形商标(L001)、文本商标+替换词(T001/T002)、版权(C001)、政策合规(P001/P002/P004–P007) 六大检测能力。当用户需要进行任何知识产权合规检测（专利、商标、版权）或电商平台政策合规审查时触发此 skill。
 license: MIT
 metadata:
   version: "1.0.0"
@@ -83,6 +83,10 @@ $env:ERIC_API_TOKEN = "你获取到的 API Key"
 
 ## 调用方式
 
+下列相对路径以本 `SKILL.md` 所在目录为根目录。安装位置由当前 Skill 的实际路径确定，不假设用户项目目录中存在 `scripts/detect.py`。可在工具中设置工作目录为 Skill 根目录，或用脚本绝对路径执行；使用绝对脚本路径时，图片和模拟响应路径仍相对于当前工作目录，建议也使用绝对路径。
+
+图片位置参数应放在 `--regions`、`--loc` 等多值选项之前：`d001 /path/to/image.png --regions US GB`。也可用 `--` 结束选项：`d001 --dry-run --regions US GB -- /path/to/image.png`。
+
 统一入口脚本 [scripts/detect.py](scripts/detect.py)，通过子命令区分 API：
 
 ```bash
@@ -93,7 +97,7 @@ python scripts/detect.py d001 /path/to/image.png --regions US GB --top 50
 python scripts/detect.py i001 --title "产品标题" --description "产品描述" --regions US
 
 # L001 图形商标检测
-python scripts/detect.py l001 /path/to/image.png --top 20 --regions US --enable-radar
+python scripts/detect.py l001 /path/to/image.png --top 20 --regions US
 
 # T001 文本商标检测 (--auto-safe-words 自动为高风险词调 T002)
 python scripts/detect.py t001 --title "Ps4 Wireless Controller" --text "描述..." --regions US JP --auto-safe-words
@@ -102,7 +106,7 @@ python scripts/detect.py t001 --title "Ps4 Wireless Controller" --text "描述..
 python scripts/detect.py t002 --title "产品标题" --text "产品描述" --trademark "商标词"
 
 # C001 版权检测
-python scripts/detect.py c001 /path/to/image.png --top 100 --enable-radar
+python scripts/detect.py c001 /path/to/image.png --top 100
 
 # P001 政策合规-纯图检测
 python scripts/detect.py p001 /path/to/image.png
@@ -125,6 +129,10 @@ python scripts/detect.py p007 --per-page 50 --page 1
 
 CLI 校验已记录的文本长度、地区/站点、召回数量和 JSON 结构后才调用 API。依赖见 `requirements.txt`；缺少 requests 时按错误提示安装，或使用 `uv run --with requests scripts/detect.py ...`，脚本不会自动修改 Python 环境。
 
+图片支持 PNG/JPEG/GIF/WebP/BMP，最大 20 MiB；文件与 base64 均检查图片头。URL 仅允许公网 HTTP(S) 图片直链，不跟随重定向，下载器不使用代理环境变量。离线验证可直接使用 `tests/fixtures/sample.png`；通过文件头检查不等同于完整图片解码或内容安全审查。
+
+`t001 --auto-safe-words` 实际执行后续请求时需要非空 `--text`；单词无替换结果（4003009/4003010）会继续处理其他词并最终以退出码 1 报告不完整结果。认证、余额、传输等错误停止后续调用，不自动重试。`--json` 不执行后续请求。
+
 ## D001 外观专利检测
 
 通过产品图片搜索相似外观专利，按相似度排序，单次最多 500 条。
@@ -145,7 +153,7 @@ CLI 校验已记录的文本长度、地区/站点、召回数量和 JSON 结构
 
 - **URL**: `POST https://saas.eric-bot.com/v1.0/eric-api/patent/utility/v1/detection`
 - **必需参数**: `product_title`, `product_description`, `regions`(仅["US"]), `top_number`(1-500)
-- **关键响应**: `data.data[]` 含 `similarity`(number), `title`, `abstract`, `publication_number`, `cpc_classification[]`, `specification_url`, `claims_url`
+- **关键响应**: `data.data[]` 含 `similarity`(number), `title`, `title_cn`, `patent_abstract`/`patent_abstract_cn`, `publication_number`, `cpc_kind`(层级数组), `specification`/`specification_cn`, `claims`/`claims_cn`
 - **风险判断**: `similarity > 0.8` → 高风险
 - **费用**: 10 点/次
 - **默认站点**: US（当前仅支持 US）
@@ -178,7 +186,7 @@ T001 检测产品文本中的商标词及风险等级；T002 为高风险词生�
 - **URL**: `POST https://saas.eric-bot.com/v1.0/eric-api/trademark/text/v1/detection`
 - **必需参数**: `product_title`(≤300字符)
 - **可选参数**: `product_text`(≤5000字符), `regions`(支持地区见下方；CLI 默认 US)
-- **关键响应**: `data.text_trademarks[]` 含 `trademark_name`, `highest_mode_score`(0-5), `status`, `is_active_holder`, `is_famous`, `region_score[]`；`data.text_trademark_radar`(0=低风险/1=待核查/2=高风险)
+- **关键响应**: `data.text_trademarks[]` 含 `trademark_name`, `highest_mode_score`(0-5), `status`, `is_active_holder`, `is_famous`, `region_risk_scores[]`(含 `region`, `risk_score`)；`data.text_trademark_radar`(0=低风险/1=待核查/2=高风险)
 - **费用**: 1 点/次
 - **超时**: 90 秒
 - **默认站点**: US
@@ -210,7 +218,7 @@ T001 检测产品文本中的商标词及风险等级；T002 为高风险词生�
 
 详细参数、响应字段、错误码和代码示例见 [references/copyright-detection.md](references/copyright-detection.md)。
 
-## P001-P007 政策合规检测
+## P001/P002/P004–P007 政策合规检测
 
 检测产品是否违反电商平台销售政策，并管理风险特征词。
 
@@ -227,10 +235,10 @@ T001 检测产品文本中的商标词及风险等级；T002 为高风险词生�
 - **URL**: `POST https://saas.eric-bot.com/v1.0/eric-api/policy-compliance/v1/detection`
 - **必需参数**: `product_title`, `platform_sites`(如 `{"amazon":["us","jp"]}`), `feature_detect`(含 `enable`, `features`)
 - **可选参数**: `product_description`, `type`(P001有结果时传), `product_title_suspected`
-- **关键响应**: `data.list[]` 含 `prohibited`(1=禁售), `compliance`(1=限售), `reason`, `content_url`, `name`
+- **关键响应**: `data.list[]` 含 `prohibited`(1=禁售), `compliance`(1=限售), `reason`, `content_url`, `name`；`data.risk_feature_list[]` 含 `type`, `score`, `desc`，CLI 保留全部返回字段，不自行推断分数阈值
 - **费用**: 5 + 特征词数×2 点/次（**图文同时入参检测仍为 5+2n 点**，不分开计费）
 - **默认平台/站点**: Amazon / us；`--sites` 仅配置 Amazon，支持 br, fr, au, us, **uk**(非gb), jp, it, es, mx, de, ca
-- **其他平台**: 使用 `--platform-sites` 覆盖 `--sites`，如 `'{"tiktok":["sg"]}'`。TikTok SG 已实测返回对应政策；其他平台未维护完整站点列表，CLI 校验非空平台名和非空字符串站点数组，服务端决定是否支持。站点代码转为小写；试运行通过不表示服务端支持。详见 [政策参考](references/policy-detection.md)
+- **其他平台**: 使用 `--platform-sites` 覆盖 `--sites`，如 `'{"tiktok":["sg"]}'`。TikTok SG 已实测返回对应政策；其他平台未维护完整站点列表，CLI 校验非空平台名和非空字符串站点数组，服务端决定是否支持。平台名去除两端空白并转为小写，站点代码转为小写；平台名规范化后重复会被拒绝。试运行通过不表示服务端支持。详见 [政策参考](references/policy-detection.md)
 - **特征检测**: 使用 `--enable-feature` 时，必须同时提供已就绪的 `--feature-word-ids` 和非空 `--feature-image` 图片 URL；服务端实测会拒绝缺图请求
 
 ### P004-P007 风险特征词管理
