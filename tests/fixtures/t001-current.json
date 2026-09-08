@@ -1,0 +1,39 @@
+{
+  "success": true,
+  "code": 200,
+  "data": {
+    "text_trademark_radar": 2,
+    "product_nice_classes": [
+      "09"
+    ],
+    "text_trademarks": [
+      {
+        "trademark_name": "Example",
+        "is_common_sense": false,
+        "is_compatibility": false,
+        "is_active_holder": true,
+        "is_famous": true,
+        "is_amazon_brand": false,
+        "status": "Active",
+        "highest_mode_score": 4,
+        "extra_score": 0,
+        "tro_case": 0,
+        "original_text_matches": [
+          "Example"
+        ],
+        "region_risk_scores": [
+          {
+            "region": "US",
+            "risk_score": 4,
+            "detail": []
+          }
+        ]
+      }
+    ],
+    "blackwhitelist_trademarks": {
+      "blacklist_trademarks": [],
+      "whitelist_trademarks": []
+    }
+  },
+  "request_id": "offline-t001-example"
+}

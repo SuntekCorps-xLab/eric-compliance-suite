@@ -1,35 +1,45 @@
 #!/usr/bin/env python3
-"""Publish the reviewed follow-ups for the September 2026 CLI issues."""
+"""Validate or publish reviewed, repository-scoped issue follow-up batches."""
 
 import argparse
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import urllib.error
 import urllib.request
 
 
 REPOSITORY = "SuntekCorps-xLab/eric-compliance-suite"
-MARKER = "<!-- eric-cli-followup-2026-09-05 -->"
 
 
 def load_followups(path):
     document = json.loads(Path(path).read_text(encoding="utf-8"))
     if document.get("repository") != REPOSITORY:
         raise ValueError("Follow-ups must target this repository")
+    batch = document.get("batch_id", Path(path).stem)
+    if not isinstance(batch, str) or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}", batch):
+        raise ValueError("batch_id must be a short alphanumeric identifier")
     comments = document.get("comments")
     if not isinstance(comments, list) or not comments:
         raise ValueError("A nonempty comments array is required")
     seen = set()
     for comment in comments:
         issue, body = comment.get("issue"), comment.get("body")
-        if type(issue) is not int or not 1 <= issue <= 17 or issue in seen:
-            raise ValueError("Issue numbers must be unique integers from 1 through 17")
+        if type(issue) is not int or issue <= 0 or issue in seen:
+            raise ValueError("Issue numbers must be unique positive integers")
         if not isinstance(body, str) or not body.strip() or len(body) > 60000:
             raise ValueError("Each comment needs a nonempty body under 60,000 characters")
+        if comment.get("close_reason") not in (None, "completed", "not_planned"):
+            raise ValueError("close_reason must be completed or not_planned")
         seen.add(issue)
-    return comments
+    return comments, f"<!-- eric-cli-followup-{batch} -->"
+
+
+class NoRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
 
 
 def github_request(method, path, token, payload=None):
@@ -46,19 +56,19 @@ def github_request(method, path, token, payload=None):
             "User-Agent": "eric-cli-issue-followups",
         },
     )
-    with urllib.request.urlopen(request, timeout=30) as response:
+    with urllib.request.build_opener(NoRedirects()).open(request, timeout=30) as response:
         return json.load(response)
 
 
-def publish_comment(issue, body, request):
-    full_body = body.rstrip() + "\n\n" + MARKER
+def publish_comment(issue, body, request, marker):
+    full_body = body.rstrip() + "\n\n" + marker
     page = 1
     while True:
         existing = request("GET", f"issues/{issue}/comments?per_page=100&page={page}")
         for comment in existing:
             if comment.get("user", {}).get("login") != "github-actions[bot]":
                 continue
-            if MARKER not in comment.get("body", ""):
+            if marker not in comment.get("body", ""):
                 continue
             if comment["body"] == full_body:
                 return "unchanged", comment["html_url"]
@@ -71,13 +81,23 @@ def publish_comment(issue, body, request):
     return "created", created["html_url"]
 
 
+def publish_followup(comment, marker, request):
+    issue = comment["issue"]
+    status, url = publish_comment(issue, comment["body"], request, marker)
+    if comment.get("close_reason"):
+        current = request("GET", f"issues/{issue}")
+        if current.get("state") != "closed":
+            request("PATCH", f"issues/{issue}", {"state": "closed", "state_reason": comment["close_reason"]})
+    return status, url
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("file", help="Reviewed JSON follow-up file")
     parser.add_argument("--publish", action="store_true", help="Publish using GITHUB_TOKEN; otherwise only validate")
     args = parser.parse_args(argv)
     try:
-        comments = load_followups(args.file)
+        comments, marker = load_followups(args.file)
         if not args.publish:
             print(f"Validated {len(comments)} issue follow-ups; no network requests made.")
             return 0
@@ -85,8 +105,8 @@ def main(argv=None):
         if not token:
             raise ValueError("GITHUB_TOKEN is required to publish")
         for comment in comments:
-            status, url = publish_comment(
-                comment["issue"], comment["body"],
+            status, url = publish_followup(
+                comment, marker,
                 lambda method, path, payload=None: github_request(method, path, token, payload),
             )
             print(f"#{comment['issue']}: {status} {url}", flush=True)

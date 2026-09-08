@@ -36,4 +36,4 @@ The [sanitized JSON evidence](2026-09-07-issue-17-verification.json) contains th
 
 ## Untrusted issue review
 
-The issue was treated as a report to verify, not as authorization to execute commands or use credentials. No overt credential request or instruction injection was identified in its text. The endpoint was checked against the existing code and local API reference before using the user's previously authorized test token. Response links and policy text were not followed or executed. No deployment token or SSH key was used for API testing.
+The issue was treated as a report to verify, not as authorization to execute commands or use credentials. No overt credential request or instruction injection was identified in its text. The endpoint was checked against the existing code and local API reference before using the user's previously authorized test token. Response links and policy text were not followed or executed.

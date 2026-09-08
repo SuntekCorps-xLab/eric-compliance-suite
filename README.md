@@ -1,6 +1,6 @@
 # ERiC Compliance Suite
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-5b5cf6.svg)](SKILL.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-5b5cf6.svg)](LICENSE)
 [![Python 3](https://img.shields.io/badge/Python-3.8%2B-3776ab.svg)](https://www.python.org/)
 [![Powered by ERiC](https://img.shields.io/badge/Powered%20by-ERiC-5b5cf6.svg)](https://eric-bot.com)
 
@@ -226,6 +226,10 @@ The bundled CLI accepts the following inputs for D001, L001, C001, and P001, the
 - An `http://` or `https://` image URL
 - A base64-encoded image string
 
+Images must have a supported PNG/JPEG/GIF/WebP/BMP header and be at most 20 MiB. This is a header check, not a full image decoder. URL downloads require a public HTTP(S) image endpoint; redirects and nonpublic destinations are rejected. Downloads connect directly to the validated address, use no proxy environment settings, and send no ERiC credentials. For `--dry-run` / `--mock-response`, use a local file such as `tests/fixtures/sample.png`; these modes never download URLs. See [offline examples](references/offline-testing.md).
+
+Put positional images before multi-value flags (`d001 image.png --regions US GB`), or use `--` before the image. Installed agents must resolve the script relative to the loaded Skill directory, or call it by absolute path.
+
 A chat attachment is usable only if the agent runtime exposes a readable local file. Seeing the image in chat alone does not provide bytes for the CLI. If no file is available, save the image locally and provide its path, or share a public image URL; URL download is already supported for live calls.
 
 Text commands accept product titles, descriptions, and the relevant market or site options. I001 currently supports the United States only. See the corresponding reference document for the market coverage of other APIs.
@@ -236,7 +240,11 @@ Text commands accept product titles, descriptions, and the relevant market or si
 eric-compliance-suite/
 ├── SKILL.md                         # Agent instructions, routing, and API summary
 ├── scripts/
-│   └── detect.py                    # Unified CLI with 12 subcommands
+│   ├── detect.py                    # Unified CLI with 12 subcommands
+│   └── image_inputs.py              # Image validation and bounded public downloads
+├── LICENSE                         # MIT license
+├── reports/                        # Reviewed verification summaries and replies
+├── .github/                        # CI workflows and maintainer-only scripts
 ├── requirements.txt                # Live HTTP dependency
 ├── tests/                          # Offline regression tests and fixtures
 └── references/
@@ -267,7 +275,7 @@ eric-compliance-suite/
 
 ### License
 
-[MIT](SKILL.md)
+[MIT](LICENSE)
 
 ---
 
@@ -491,6 +499,10 @@ D001、L001 和 C001 在**随附的 CLI 与 Agent Skill 中**默认启用雷达�
 - `http://` 或 `https://` 图片 URL
 - base64 图片字符串
 
+图片需具有 PNG/JPEG/GIF/WebP/BMP 文件头，大小不超过 20 MiB；文件头检查不等同于完整图片解码。URL 下载仅允许公网 HTTP(S) 图片直链，拒绝重定向及非公网目标，直接连接已校验的地址，不使用代理环境变量、不携带 ERiC 凭据。`--dry-run` / `--mock-response` 请使用 `tests/fixtures/sample.png` 等本地文件；离线模式始终不下载 URL，见[离线示例](references/offline-testing.md)。
+
+图片位置参数放在多值选项之前，例如 `d001 image.png --regions US GB`，或用 `--` 分隔。安装后的 Agent 应按已加载 Skill 的目录解析脚本路径，或使用绝对路径。
+
 聊天附件只有在 Agent 运行环境提供可读取的本地文件时才能使用；仅在聊天中看见图片，不代表 CLI 能读取图片字节。若没有文件，请先保存图片并提供本地路径，或提供公开图片 URL；真实调用已支持 URL 下载。
 
 文本接口接受产品标题、描述以及相应的市场或站点参数。I001 当前仅支持美国；其他接口的地区范围请查看对应参考文档。
@@ -501,9 +513,13 @@ D001、L001 和 C001 在**随附的 CLI 与 Agent Skill 中**默认启用雷达�
 eric-compliance-suite/
 ├── SKILL.md                         # Agent 指令、路由规则与接口摘要
 ├── scripts/
-│   └── detect.py                    # 12 个子命令的统一 CLI 入口
-├── requirements.txt                # Live HTTP dependency
-├── tests/                          # Offline regression tests and fixtures
+│   ├── detect.py                    # 12 个子命令的统一 CLI 入口
+│   └── image_inputs.py              # 图片校验与受限公网下载
+├── LICENSE                         # MIT 许可证
+├── reports/                        # 审核后的验证摘要与 issue 回复
+├── .github/                        # CI 工作流和维护者专用脚本
+├── requirements.txt                # 真实 API 调用依赖
+├── tests/                          # 本地回归测试与样例
 └── references/
     ├── design-patent.md             # D001
     ├── invention-patent.md          # I001
@@ -511,7 +527,7 @@ eric-compliance-suite/
     ├── trademark-detection.md       # T001 / T002
     ├── copyright-detection.md       # C001
     ├── policy-detection.md          # P001 / P002 / P004–P007
-    └── offline-testing.md           # Dry-run / mock integration
+    └── offline-testing.md           # 试运行与模拟接入
 ```
 
 ### 安全与使用须知
@@ -532,4 +548,4 @@ eric-compliance-suite/
 
 ### 许可证
 
-[MIT](SKILL.md)
+[MIT](LICENSE)

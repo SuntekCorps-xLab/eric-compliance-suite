@@ -139,7 +139,7 @@ class RequestLifecycleTests(unittest.TestCase):
             {"trademark_name": "One", "highest_mode_score": 4},
             {"trademark_name": "Two", "highest_mode_score": 3},
         ]}}
-        code, _, error, api = invoke(COMMANDS["t001"] + ["--auto-safe-words"], responses=[trademark, SUCCESS, FAILURE])
+        code, _, error, api = invoke(COMMANDS["t001"] + ["--text", "Description", "--auto-safe-words"], responses=[trademark, SUCCESS, FAILURE])
         self.assertEqual(code, 1)
         self.assertEqual(api.call_count, 3)
         self.assertEqual(error.count("T002 调用完成"), 1)
@@ -151,7 +151,7 @@ class RequestLifecycleTests(unittest.TestCase):
             fixture = Path(directory) / "responses.json"
             for response, expected in ((trademark, 1), ([trademark, SUCCESS], 0)):
                 fixture.write_text(json.dumps(response), encoding="utf-8")
-                code, _, error, api = invoke(COMMANDS["t001"] + ["--auto-safe-words", "--mock-response", str(fixture)], token="")
+                code, _, error, api = invoke(COMMANDS["t001"] + ["--text", "Description", "--auto-safe-words", "--mock-response", str(fixture)], token="")
                 self.assertEqual(code, expected, error)
                 api.assert_not_called()
 
@@ -176,7 +176,7 @@ class ValidationTests(unittest.TestCase):
                 self.assertEqual(code, 0, error)
                 api.assert_not_called()
                 preview = json.loads(output)
-                expected = {platform: [site.lower() for site in sites]
+                expected = {platform.lower(): [site.lower() for site in sites]
                             for platform, sites in platforms.items()}
                 self.assertEqual(preview["payload"]["platform_sites"], expected)
                 self.assertEqual(preview["estimated_points"], 5)
@@ -367,6 +367,8 @@ class ResponseContractTests(unittest.TestCase):
     def test_api_transport_auth_and_http_error_envelope(self):
         requests = mock.Mock()
         requests.RequestException = RuntimeError
+        requests.exceptions.Timeout = TimeoutError
+        requests.post.return_value.status_code = 200
         requests.post.return_value.json.return_value = SUCCESS
         with mock.patch.object(detect, "ensure_requests", return_value=requests):
             result = detect.api_call("secret", PATHS["t001"], {"product_title": "Lamp"}, 90)
@@ -381,6 +383,8 @@ class ResponseContractTests(unittest.TestCase):
     def test_transport_failures_are_actionable_and_never_retried(self):
         requests = mock.Mock()
         requests.RequestException = RuntimeError
+        requests.exceptions.Timeout = TimeoutError
+        requests.post.return_value.status_code = 200
         for error in (RuntimeError("timeout"), ValueError("invalid JSON")):
             requests.post.reset_mock()
             requests.post.side_effect = error

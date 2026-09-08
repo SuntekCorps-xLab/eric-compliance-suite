@@ -4,10 +4,9 @@
 """
 
 import argparse
-import base64
-import binascii
 import copy
 import json
+import math
 import os
 import sys
 
@@ -15,6 +14,12 @@ import sys
 for stream in (sys.stdout, sys.stderr):
     if hasattr(stream, "reconfigure") and stream.encoding != "utf-8":
         stream.reconfigure(encoding="utf-8")
+
+if __package__:
+    from .image_inputs import load_image
+else:
+    from image_inputs import load_image
+
 
 BASE = "https://saas.eric-bot.com/v1.0/eric-api"
 
@@ -34,6 +39,70 @@ PLATFORM_SITE_ALLOWLISTS = {
 
 class CLIError(Exception):
     """An actionable error that does not need a traceback."""
+
+
+class APIResponseError(CLIError):
+    def __init__(self, code):
+        self.code = str(code)
+        super().__init__(f"API 返回失败 [{code}]；详情见上方错误信息。")
+
+
+class ResponseFormatError(CLIError):
+    pass
+
+
+def response_list(data, field, entry_type=dict):
+    value = data.get(field, [])
+    if not isinstance(value, list) or any(not isinstance(item, entry_type) for item in value):
+        raise ResponseFormatError(f"响应字段 {field} 需要数组及有效条目，不能为 null。")
+    return value
+
+
+def number(value, field):
+    try:
+        parsed = float(value) if value is not None else 0.0
+        if isinstance(value, bool) or not math.isfinite(parsed):
+            raise ValueError()
+        return parsed
+    except (TypeError, ValueError) as exc:
+        raise ResponseFormatError(f"响应字段 {field} 需要有限数值。") from exc
+
+
+def validate_response(command, result):
+    """Check renderer inputs before producing partial or misleading risk output."""
+    data = result.get("data", {})
+    if not isinstance(data, dict):
+        raise ResponseFormatError("响应字段 data 需要对象，不能为 null。")
+    fields = {"d001": "list", "i001": "data", "c001": "list", "p001": "list",
+              "p002": "list", "p007": "data"}
+    if command in fields:
+        items = response_list(data, fields[command], (dict, str) if command == "p001" else dict)
+        for item in items:
+            if isinstance(item, dict):
+                for field in ("similarity", "cosine", "prohibited", "compliance"):
+                    if field in item:
+                        number(item[field], field)
+                if command == "d001" and item.get("radar_result") is not None and not isinstance(item["radar_result"], dict):
+                    raise ResponseFormatError("响应字段 radar_result 需要对象或 null。")
+    if command == "l001":
+        for detection in response_list(data, "detection_results"):
+            for region in response_list(detection, "top_graphic_trademarks"):
+                for item in response_list(region, "graphic_trademarks"):
+                    number(item.get("similarity"), "similarity")
+    if command == "t001":
+        field = "text_trademarks" if "text_trademarks" in data else "trademark_list"
+        number(data.get("text_trademark_radar"), "text_trademark_radar")
+        for item in response_list(data, field):
+            number(item.get("highest_mode_score"), "highest_mode_score")
+            for key in ("region_risk_scores", "region_score"):
+                if key in item:
+                    response_list(item, key)
+    if command in ("t002", "p004"):
+        response_list(data, "words" if command == "t002" else "word_arr", str)
+        if command == "p004":
+            number(data.get("status"), "status")
+    if command == "p002":
+        response_list(data, "risk_feature_list")
 
 # 扣点配置表
 POINT_COSTS = {
@@ -84,7 +153,7 @@ def perform_request(args, token, path, payload, timeout=120):
             "estimated_points": points,
             "points_consumed": 0,
         }
-        if getattr(args, "auto_safe_words", False):
+        if getattr(args, "auto_safe_words", False) and not args.json:
             preview["follow_up"] = "T002: 每个高风险词预计 1 点；词数取决于 T001 响应，试运行不执行。"
         print(json.dumps(preview, ensure_ascii=False, indent=2))
         raise SystemExit(0)
@@ -106,9 +175,15 @@ def perform_request(args, token, path, payload, timeout=120):
         print(f"API 错误 [{result.get('code')}]: {result.get('message')}", file=sys.stderr)
         if not args.mock_response:
             print("请求失败，扣点未确认；请以 ERiC 平台流水为准。", file=sys.stderr)
-        raise SystemExit(1)
+        raise APIResponseError(result.get("code"))
     if not args.mock_response:
         print(f"💰 {args.command.upper()} 调用完成，预计扣点: {points} 点；实际扣点请以 ERiC 平台流水为准。", file=sys.stderr)
+    if not args.json:
+        try:
+            validate_response(args.command, result)
+        except ResponseFormatError as exc:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            raise ResponseFormatError(f"{exc} 已输出原始响应供诊断，请勿为获取原始响应重复计费调用。") from exc
     return result
 
 
@@ -145,53 +220,30 @@ def ensure_requests():
 
 def api_call(token, path, payload, timeout=120):
     requests = ensure_requests()
+    resp = None
     try:
         resp = requests.post(
-            f"{BASE}/{path}", headers=request_headers(token), json=payload, timeout=timeout,
+            f"{BASE}/{path}", headers=request_headers(token), json=payload, timeout=timeout, allow_redirects=False,
         )
+        if 300 <= resp.status_code < 400:
+            raise CLIError(f"API HTTP {resp.status_code}：已阻止重定向，未向其他地址转发凭据；未自动重试，扣点未确认。")
         # Preserve ERiC error envelopes, including those delivered with HTTP 4xx/5xx.
         result = resp.json()
         if not isinstance(result, dict) or result.get("success") is not False:
             resp.raise_for_status()
         return result
     except (requests.RequestException, ValueError) as exc:
+        status = f" HTTP {resp.status_code}" if resp is not None else ""
+        kind = type(exc).__name__
+        if isinstance(exc, requests.exceptions.Timeout):
+            detail = "请求超时（服务端可能已完成并扣点）"
+        elif isinstance(exc, ValueError):
+            detail = "响应不是有效 JSON"
+        else:
+            detail = "网络、TLS 或 HTTP 请求失败"
         raise CLIError(
-            "API 请求失败或响应不是有效 JSON；未自动重试，扣点未确认，请查看 ERiC 平台流水。"
+            f"API{status} [{kind}] {detail}；未自动重试，扣点未确认，请查看 ERiC 平台流水。"
         ) from exc
-
-
-def load_image(source, offline=False):
-    """Encode a local file, downloaded URL or fully validated base64 string."""
-    if source.startswith(("http://", "https://")):
-        if offline:
-            raise CLIError("离线模式不下载图片 URL；请先保存图片，再提供本地路径或 base64。")
-        requests = ensure_requests()
-        try:
-            resp = requests.get(source, timeout=30, headers={"User-Agent": "Mozilla/5.0"})
-            resp.raise_for_status()
-            if not resp.content:
-                raise CLIError("下载的图片为空。")
-            return base64.b64encode(resp.content).decode("ascii")
-        except requests.RequestException as exc:
-            raise CLIError("下载图片失败；请检查图片 URL 或改用本地路径。") from exc
-    try:
-        if os.path.isfile(source):
-            with open(source, "rb") as f:
-                content = f.read()
-            if not content:
-                raise CLIError("图片文件为空。")
-            return base64.b64encode(content).decode("ascii")
-    except OSError as exc:
-        raise CLIError(f"无法读取图片文件：{exc}") from exc
-    try:
-        if source and base64.b64decode(source, validate=True):
-            return source
-    except (ValueError, binascii.Error):
-        pass
-    raise CLIError(
-        "无法识别图片来源。请提供可访问的本地图片路径、HTTP(S) URL 或完整 base64。\n"
-        "聊天中可见的图片不一定有可读取的文件；请将图片保存到本地后提供路径，或提供公开图片 URL。"
-    )
 
 
 # ── D001 外观专利检测 ──────────────────────────────────────────
@@ -225,11 +277,13 @@ def cmd_d001(args, token):
     patents = result.get("data", {}).get("list", [])
     print(f"共找到 {len(patents)} 条相似外观专利\n")
     for i, p in enumerate(patents[:20], 1):
-        sim = float(p.get("similarity", 0))
+        sim = number(p.get("similarity"), "similarity")
         risk = "🔴高风险" if sim > 0.8 else ("🟡中风险" if sim > 0.5 else "🟢低风险")
         tro = " [TRO]" if p.get("tro_holder") or p.get("tro_case") else ""
+        if normalize_radar(p.get("tro_holder")) is True:
+            risk = "🔴高风险"
         radar = ""
-        if enable_radar and (p.get("radar_result") or {}).get("same"):
+        if enable_radar and normalize_radar((p.get("radar_result") or {}).get("same")) is True:
             radar = " [雷达:疑似侵权]"
             risk = "🔴高风险"
         print(f"{i}. {risk}{tro}{radar}")
@@ -260,7 +314,7 @@ def cmd_i001(args, token):
     patents = result.get("data", {}).get("data", [])
     print(f"共找到 {len(patents)} 条相似发明专利\n")
     for i, p in enumerate(patents[:20], 1):
-        sim = float(p.get("similarity", 0))
+        sim = number(p.get("similarity"), "similarity")
         risk = "🔴高风险" if sim > 0.8 else ("🟡中风险" if sim > 0.5 else "🟢低风险")
         tro = " [TRO]" if p.get("tro_holder") or p.get("tro_case") else ""
         print(f"{i}. {risk}{tro}")
@@ -300,8 +354,8 @@ def cmd_l001(args, token):
 
     data = result.get("data", {})
     print(f"检测到 {data.get('bounding_box_count', 0)} 个logo区域")
-    if data.get("radar_result"):
-        print(f"整体雷达风险: {data['radar_result']}\n")
+    if enable_radar:
+        print(f"整体雷达风险: {radar_label(data.get('radar_result'))}\n")
 
     for dr in data.get("detection_results", []):
         idx = dr.get("index", 0)
@@ -312,9 +366,11 @@ def cmd_l001(args, token):
             tms = rg.get("graphic_trademarks", [])
             print(f"\n  国家/地区: {region} ({len(tms)} 条)")
             for j, tm in enumerate(tms[:10], 1):
-                sim = float(tm.get("similarity", 0))
+                sim = number(tm.get("similarity"), "similarity")
                 risk = "🔴高" if sim > 0.8 else ("🟡中" if sim > 0.5 else "🟢低")
-                sub_r = f" [{tm.get('sub_radar_result')}]" if tm.get("sub_radar_result") else ""
+                sub_r = f" [雷达:{radar_label(tm.get('sub_radar_result'))}]" if enable_radar else ""
+                if enable_radar and normalize_radar(tm.get("sub_radar_result")) is True:
+                    risk = "🔴高"
                 print(f"  {j}. {risk}{sub_r} 相似度:{sim:.4f} | {tm.get('trademark_name','')} | 权利人:{tm.get('applicant_name','')} | 状态:{tm.get('trade_mark_status','')}")
             if len(tms) > 10:
                 print(f"  ... 还有 {len(tms) - 10} 条")
@@ -339,7 +395,7 @@ def cmd_t001(args, token):
         return
 
     data = result.get("data", {})
-    radar = data.get("text_trademark_radar", 0)
+    radar = number(data.get("text_trademark_radar"), "text_trademark_radar")
     radar_labels = {0: "🟢低风险", 1: "🟡待人工核查", 2: "🔴高风险"}
     print(f"整体风险等级: {radar_labels.get(radar, radar)}\n")
 
@@ -348,32 +404,44 @@ def cmd_t001(args, token):
         print("未检测到商标词风险")
         return
 
-    trademarks.sort(key=lambda x: x.get("highest_mode_score", 0), reverse=True)
+    trademarks = sorted(trademarks, key=lambda x: number(x.get("highest_mode_score"), "highest_mode_score"), reverse=True)
     for i, tm in enumerate(trademarks, 1):
-        score = tm.get("highest_mode_score", 0)
+        score = number(tm.get("highest_mode_score"), "highest_mode_score")
         risk = "🔴" if score >= 3 else ("🟡" if score >= 1 else "🟢")
         flags = []
-        if tm.get("is_famous"): flags.append("著名商标")
-        if tm.get("is_active_holder"): flags.append("活跃维权人")
-        if tm.get("is_amazon_brand"): flags.append("Amazon品牌")
-        if tm.get("is_common_sense"): flags.append("常用词")
+        if normalize_radar(tm.get("is_famous", tm.get("famous"))) is True: flags.append("著名商标")
+        if normalize_radar(tm.get("is_active_holder", tm.get("active_holder"))) is True: flags.append("活跃维权人")
+        if normalize_radar(tm.get("is_amazon_brand", tm.get("amazon_brand"))) is True: flags.append("Amazon品牌")
+        if normalize_radar(tm.get("is_common_sense", tm.get("common_sense"))) is True: flags.append("常用词")
         flag_str = f" [{', '.join(flags)}]" if flags else ""
         print(f"{i}. {risk} {tm.get('trademark_name', tm.get('trademark', ''))} (分数:{score}/5, 状态:{tm.get('status', '')}){flag_str}")
-        rs = tm.get("region_score", [])
+        rs = tm.get("region_risk_scores", tm.get("region_score", []))
         if rs:
-            scores_str = ", ".join(f"{r.get('region','')}:{r.get('score',0)}" for r in rs)
+            scores_str = ", ".join(f"{r.get('region','')}:{r.get('risk_score', r.get('score', 0))}" for r in rs)
             print(f"   各国风险: {scores_str}")
 
     if auto_safe:
-        high_risk = [tm for tm in trademarks if tm.get("highest_mode_score", 0) >= 3]
+        high_risk = [tm for tm in trademarks if number(tm.get("highest_mode_score"), "highest_mode_score") >= 3]
         followup_args = copy.copy(args)
         followup_args.command = "t002"
+        failed_terms = []
         for tm in high_risk:
-            _get_safe_words(followup_args, token, args.title, args.text, tm.get("trademark_name", tm.get("trademark", "")))
+            name = tm.get("trademark_name", tm.get("trademark", ""))
+            try:
+                _get_safe_words(followup_args, token, args.title, args.text, name)
+            except APIResponseError as exc:
+                if exc.code not in ("4003009", "4003010"):
+                    raise CLIError(f"「{name}」替换词请求失败；已停止后续调用以避免继续扣点。") from exc
+                failed_terms.append(name)
+                print(f"「{name}」未获取到替换词 [{exc.code}]，继续处理其他词。", file=sys.stderr)
+        if failed_terms:
+            raise CLIError(f"替换词查询已完成，{len(failed_terms)} 个词无可用结果：{', '.join(failed_terms)}；需人工处理。")
 
 # ── T002 商标替换词 ────────────────────────────────────────────
 
 def _get_safe_words(args, token, title, text, trademark_name, output_json=False):
+    if not all(isinstance(value, str) and value.strip() for value in (title, text, trademark_name)):
+        raise CLIError("T002 需要非空标题、描述和商标词；未发送替换词请求。")
     result = perform_request(args, token, "trademark/text/v1/safe-words-generation", {
         "product_title": title,
         "product_text": text,
@@ -477,13 +545,15 @@ def cmd_p001(args, token):
 
     print(f"找到 {len(real_items)} 条相似违规产品:\n")
     for i, item in enumerate(real_items, 1):
-        cosine = float(item.get("cosine", 0))
+        cosine = number(item.get("cosine"), "cosine")
         print(f"{i}. 相似度: {cosine:.4f}")
         print(f"   标题: {item.get('pd_title', '')}")
         print(f"   中文: {item.get('pd_title_CHN_censored', '')}")
+        if item.get("pd_img_oss_url"):
+            print(f"   图片: {item['pd_img_oss_url']}")
         print()
 
-    if any(float(it.get("cosine", 0)) >= 0.4 for it in real_items):
+    if any(number(it.get("cosine"), "cosine") >= 0.4 for it in real_items):
         print("建议: 存在高相似度违规产品，建议继续使用 p002 确认具体违反的政策")
 
 
@@ -518,10 +588,9 @@ def cmd_p002(args, token):
 
     items = result.get("data", {}).get("list", [])
     if not items:
-        print("未检测到政策合规风险")
-        return
-
-    print(f"检测到 {len(items)} 条政策匹配:\n")
+        print("未返回政策匹配；不代表产品合规。")
+    else:
+        print(f"检测到 {len(items)} 条政策匹配:\n")
     for i, item in enumerate(items, 1):
         prohibited = item.get("prohibited", 0)
         compliance = item.get("compliance", 0)
@@ -536,7 +605,18 @@ def cmd_p002(args, token):
         print(f"   政策: {item.get('name_cn', '')} ({item.get('name', '')})")
         if item.get("reason"):
             print(f"   原因: {item.get('reason')}")
+        if item.get("content_url"):
+            print(f"   政策原文: {item['content_url']}")
         print()
+
+    features = result.get("data", {}).get("risk_feature_list", [])
+    if features:
+        print(f"风险特征结果 ({len(features)} 条):")
+        for feature in features:
+            # Keep every returned field; do not invent a hit threshold for score.
+            print("  " + json.dumps(feature, ensure_ascii=False))
+    elif args.enable_feature:
+        print("未返回风险特征结果；不代表所有特征均未命中。")
 
 
 # ── P004-P007 风险特征词管理 ───────────────────────────────────
@@ -552,6 +632,9 @@ def cmd_p004(args, token):
     words = data.get("word_arr", [])
     if words:
         print(f"联想词: {', '.join(words)}")
+    count = data.get("suggestionNum", data.get("suggestion_num"))
+    if count is not None:
+        print(f"联想词总数: {count}")
 
 def cmd_p005(args, token):
     result = perform_request(args, token, "policy-compliance/feature/v1/save", {"word": args.word}, timeout=30)
@@ -621,14 +704,20 @@ def validate_args(args):
     for field in required.get(args.command, ()):
         if not getattr(args, field).strip():
             raise CLIError(f"{field} 不能为空或仅含空格")
+    if args.command == "t001" and args.auto_safe_words and not args.json and not args.text.strip():
+        raise CLIError("--auto-safe-words 需要非空 --text，以便构造 T002 后续请求")
     if args.command == "p002":
         sites = parse_json(args.platform_sites, "--platform-sites") if args.platform_sites else {"amazon": args.sites}
         if not isinstance(sites, dict) or not sites:
             raise CLIError("--platform-sites 必须是非空对象，例如 {\"amazon\":[\"us\"]}")
+        normalized_sites = {}
         for platform, values in sites.items():
             if not platform.strip() or not isinstance(values, list) or not values:
                 raise CLIError("--platform-sites 的平台名和站点数组均不能为空")
-            supported_sites = PLATFORM_SITE_ALLOWLISTS.get(platform.strip().lower())
+            platform = platform.strip().lower()
+            if platform in normalized_sites:
+                raise CLIError("--platform-sites 平台名规范化后重复，请合并站点数组")
+            supported_sites = PLATFORM_SITE_ALLOWLISTS.get(platform)
             for site in values:
                 if not isinstance(site, str) or not site.strip():
                     raise CLIError("--platform-sites 的站点必须是非空字符串")
@@ -637,8 +726,8 @@ def validate_args(args):
                         f"--platform-sites 平台 {platform!r} 不支持站点 {site!r}；"
                         f"支持 {', '.join(supported_sites)}"
                     )
-            sites[platform] = [site.lower() for site in values]
-        args.platform_sites = sites
+            normalized_sites[platform] = [site.lower() for site in values]
+        args.platform_sites = normalized_sites
         ids = parse_json(args.feature_word_ids, "--feature-word-ids") if args.feature_word_ids else []
         if not isinstance(ids, list) or any(type(value) is not int or value <= 0 for value in ids):
             raise CLIError("--feature-word-ids 必须是正整数 ID 数组，例如 [123, 456]")
@@ -780,6 +869,8 @@ def build_parser():
         modes = command_parser.add_mutually_exclusive_group()
         modes.add_argument("--dry-run", action="store_true", help="离线校验并输出请求 JSON；无需 Token，不联网，不扣点")
         modes.add_argument("--mock-response", metavar="FILE", help="使用本地响应 JSON 或响应数组；无需 Token，不联网，不扣点")
+    for image_parser in (d, l, c, p1):
+        image_parser.epilog = "图片参数请放在多值选项之前，例如 d001 image.png --regions US GB；或以 -- 分隔：d001 --regions US GB -- image.png。"
     return parser
 
 
@@ -802,14 +893,21 @@ def main(argv=None):
     }
     try:
         if args.mock_response:
-            with open(args.mock_response, encoding="utf-8-sig") as f:
-                responses = json.load(f)
+            try:
+                with open(args.mock_response, encoding="utf-8-sig") as f:
+                    responses = json.load(f)
+            except UnicodeError as exc:
+                raise CLIError(f"--mock-response {args.mock_response!r}：请另存为 UTF-8 JSON 文件（支持 BOM）。") from exc
+            except json.JSONDecodeError as exc:
+                raise CLIError(f"--mock-response {args.mock_response!r}：JSON 格式无效，第 {exc.lineno} 行第 {exc.colno} 列。") from exc
+            except OSError as exc:
+                raise CLIError(f"--mock-response {args.mock_response!r}：无法读取文件 [{type(exc).__name__}]，请检查文件路径和权限。") from exc
             args.mock_responses = responses if isinstance(responses, list) else [responses]
             if not args.mock_responses or any(
                 not isinstance(response, dict) or not isinstance(response.get("success"), bool)
                 for response in args.mock_responses
             ):
-                raise CLIError("模拟响应必须是含布尔 success 字段的对象或非空对象数组。")
+                raise CLIError(f"--mock-response {args.mock_response!r}：模拟响应必须是含布尔 success 字段的对象或非空对象数组。")
         token = os.environ.get("ERIC_API_TOKEN", "").strip() if args.dry_run or args.mock_response else check_token()
         cmds[args.command](args, token)
     except (CLIError, OSError, ValueError) as exc:

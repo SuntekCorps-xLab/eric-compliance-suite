@@ -1,0 +1,121 @@
+{
+  "repository": "SuntekCorps-xLab/eric-compliance-suite",
+  "batch_id": "2026-09-08",
+  "comments": [
+    {
+      "issue": 18,
+      "body": "Confirmed. Human-readable rendering now validates data containers, result arrays and nested items before rendering. Null or malformed containers produce a field-specific error and the original response on stdout, with exit 1 and no retry. They are not interpreted as a clean screening result. The --json path still preserves the original API envelope. Tests cover every renderer, null containers, malformed nested arrays and non-finite numeric values.\n\n[Batch review and verification scope](https://github.com/SuntekCorps-xLab/eric-compliance-suite/blob/main/reports/2026-09-08-issue-review.md).",
+      "close_reason": "completed"
+    },
+    {
+      "issue": 19,
+      "body": "Confirmed input-validation defect. Local files and decoded base64 now undergo supported image-header and size checks before a detection request. Missing names such as products/logo, directories and text files are rejected. We did not adopt an arbitrary minimum of hundreds of bytes or treat every slash as a file path: the valid 69-byte PNG fixture and base64 containing slashes remain usable. Checks cover PNG/JPEG/GIF/WebP/BMP headers and a 20 MiB ceiling; this is not a full image decoder. No new paid request was needed to verify rejection.\n\n[Batch review and verification scope](https://github.com/SuntekCorps-xLab/eric-compliance-suite/blob/main/reports/2026-09-08-issue-review.md).",
+      "close_reason": "completed"
+    },
+    {
+      "issue": 20,
+      "body": "Confirmed omission. P002 now prints policy content_url and every field in each risk_feature_list item, including when data.list is empty. Independent inspection and replay of the retained September 5 response found type/score/desc, rather than the id/words/hit shape in this report. The renderer preserves both shapes without inventing a score-to-hit threshold. The reference documents the observed fields. The mock billing notice continues to report zero actual mock consumption; its live-cost estimate is not a confirmed debit.\n\n[Batch review and verification scope](https://github.com/SuntekCorps-xLab/eric-compliance-suite/blob/main/reports/2026-09-08-issue-review.md).",
+      "close_reason": "completed"
+    },
+    {
+      "issue": 21,
+      "body": "Confirmed for D001 tro_holder and L001 item radar. D001 now elevates a positive tro_holder to high risk. L001 uses the shared radar normalization and elevates a positive sub_radar_result when radar is enabled; --no-radar ignores radar labels. Overall L001 radar is displayed separately, without attributing an aggregate result to every item. Tests cover low similarity, positive/negative/unknown radar values, numeric/string variants and disabled radar.\n\n[Batch review and verification scope](https://github.com/SuntekCorps-xLab/eric-compliance-suite/blob/main/reports/2026-09-08-issue-review.md).",
+      "close_reason": "completed"
+    },
+    {
+      "issue": 22,
+      "body": "Confirmed documentation drift and incomplete compatibility. The existing CLI already handled both list/name variants and current is_* flags; the report does not accurately describe that part. The reference now follows the retained live text_trademarks/trademark_name/is_* schema, including region_risk_scores[].risk_score. Rendering also accepts legacy flag and region_score spellings. Current fields take precedence, including explicit false. A synthetic current-schema fixture, compatibility tests and replay of the retained real response verify the change; --json remains unchanged.\n\n[Batch review and verification scope](https://github.com/SuntekCorps-xLab/eric-compliance-suite/blob/main/reports/2026-09-08-issue-review.md).",
+      "close_reason": "completed"
+    },
+    {
+      "issue": 23,
+      "body": "Confirmed against the retained September 5 response. The reference now uses suggestionNum. P004 displays the returned count and also accepts the older suggestion_num spelling. Both spellings are tested, and the historical real response was replayed successfully. No new management API call was made.\n\n[Batch review and verification scope](https://github.com/SuntekCorps-xLab/eric-compliance-suite/blob/main/reports/2026-09-08-issue-review.md).",
+      "close_reason": "completed"
+    },
+    {
+      "issue": 24,
+      "body": "The Skill now explicitly resolves scripts relative to the loaded SKILL.md directory, using the tool working directory or an absolute script path. It also explains that image/mock paths remain relative to the process working directory unless absolute paths are supplied. An offline subprocess test invokes the absolute script from an unrelated directory. Python fails before our code runs when the script path is wrong, so this is addressed in invocation guidance.\n\n[Batch review and verification scope](https://github.com/SuntekCorps-xLab/eric-compliance-suite/blob/main/reports/2026-09-08-issue-review.md).",
+      "close_reason": "completed"
+    },
+    {
+      "issue": 25,
+      "body": "Confirmed unnecessary operational metadata in the public verification material. Current reports remove internal names and access-method details; older reviewed bot replies now use general billing-ledger wording and link to the corrected current report. A maintainer guide adds a concrete public-evidence review checklist. Billing results and verification limits are retained. This correction does not erase earlier Git revisions, immutable URLs or external copies; repository history was not rewritten.\n\n[Batch review and verification scope](https://github.com/SuntekCorps-xLab/eric-compliance-suite/blob/main/reports/2026-09-08-issue-review.md).",
+      "close_reason": "completed"
+    },
+    {
+      "issue": 26,
+      "body": "Moved the maintainer tool to .github/scripts and documented its workflow. Issue numbers must be positive integers but have no arbitrary upper bound. Markers are derived from the file or an explicit stable batch_id, so a new batch can create a separate follow-up; rerunning the same batch stays idempotent. Historical manifests retain their original marker to avoid duplicate legacy comments. Reviewed close_reason values can close an issue only after its reply succeeds. The workflow is limited to this repository main branch, rejects redirects, and does not execute issue text. Tests cover future issue numbers, separate batches, idempotency, human-comment preservation and reply-before-close ordering.\n\n[Batch review and verification scope](https://github.com/SuntekCorps-xLab/eric-compliance-suite/blob/main/reports/2026-09-08-issue-review.md).",
+      "close_reason": "completed"
+    },
+    {
+      "issue": 27,
+      "body": "Added a LICENSE file containing the standard MIT text and the 2026 SuntekCorps copyright notice, consistent with the existing MIT declaration. The README badge and both license sections now point to LICENSE. This documentation correction required no API calls.\n\n[Batch review and verification scope](https://github.com/SuntekCorps-xLab/eric-compliance-suite/blob/main/reports/2026-09-08-issue-review.md).",
+      "close_reason": "completed"
+    },
+    {
+      "issue": 28,
+      "body": "Added ignore rules for .venv/, venv/, the documented root request.json, *.request.json and local .env files. git check-ignore verified the documented paths. Existing source files and synthetic fixtures remain tracked. No API call was required.\n\n[Batch review and verification scope](https://github.com/SuntekCorps-xLab/eric-compliance-suite/blob/main/reports/2026-09-08-issue-review.md).",
+      "close_reason": "completed"
+    },
+    {
+      "issue": 29,
+      "body": "Updated both project trees, translated the Chinese tree comments, listed the actual policy commands (P001/P002/P004-P007), and removed redundant --enable-radar flags from examples. P002 now strips and lowercases platform names before constructing the payload, matching its validation. Platform keys that collide after normalization are rejected instead of silently losing sites. Regression tests check canonical Amazon/TikTok mappings and collision errors.\n\n[Batch review and verification scope](https://github.com/SuntekCorps-xLab/eric-compliance-suite/blob/main/reports/2026-09-08-issue-review.md).",
+      "close_reason": "completed"
+    },
+    {
+      "issue": 30,
+      "body": "Aligned the I001 Skill summary with the existing reference: patent_abstract/patent_abstract_cn, cpc_kind, specification/specification_cn and claims/claims_cn, along with the existing title/publication fields. This resolves the internal documentation contradiction. I001 was not called again, and the correction is not presented as a new live-contract verification. Duplicate report #36 is tracked here.\n\n[Batch review and verification scope](https://github.com/SuntekCorps-xLab/eric-compliance-suite/blob/main/reports/2026-09-08-issue-review.md).",
+      "close_reason": "completed"
+    },
+    {
+      "issue": 31,
+      "body": "P001 human-readable output now includes pd_img_oss_url when present. The link is displayed as evidence and is not automatically fetched. An offline regression test verifies that it is available in the first rendered result, avoiding a second paid request solely to retrieve the field.\n\n[Batch review and verification scope](https://github.com/SuntekCorps-xLab/eric-compliance-suite/blob/main/reports/2026-09-08-issue-review.md).",
+      "close_reason": "completed"
+    },
+    {
+      "issue": 32,
+      "body": "Known per-term outcomes 4003009/4003010 now identify the affected term and continue with the remaining terms. The CLI finishes with exit 1 and a summary if any term lacks a result, preserving successful suggestions. Authentication, billing, transport and other errors still stop subsequent requests to avoid unnecessary charges; nothing is retried. Tests put the failure on the first term and verify the later successful result, as well as stop behavior for account-level failures.\n\n[Batch review and verification scope](https://github.com/SuntekCorps-xLab/eric-compliance-suite/blob/main/reports/2026-09-08-issue-review.md).",
+      "close_reason": "completed"
+    },
+    {
+      "issue": 33,
+      "body": "When automatic T002 follow-ups will run, nonempty --text is now required before token lookup or the initial T001 request. The shared T002 helper also guards required title/text/term values. --json keeps its documented T001-only behavior and therefore does not require follow-up text. Tests verify early rejection and the JSON exception. No live request was necessary to establish this client-side inconsistency.\n\n[Batch review and verification scope](https://github.com/SuntekCorps-xLab/eric-compliance-suite/blob/main/reports/2026-09-08-issue-review.md).",
+      "close_reason": "completed"
+    },
+    {
+      "issue": 34,
+      "body": "Transport errors now include the received HTTP status when available and the exception class. Timeouts explicitly state that the server may already have completed and charged the request. Structured ERiC error envelopes are preserved. We deliberately do not print body snippets, raw exception text, signed URLs or headers, since these can disclose data. Local HTTP tests cover HTML 200/502, JSON 500, structured 400 and blocked redirects; exception tests distinguish timeouts, connection failures and TLS errors and verify no retries or secret leakage.\n\n[Batch review and verification scope](https://github.com/SuntekCorps-xLab/eric-compliance-suite/blob/main/reports/2026-09-08-issue-review.md).",
+      "close_reason": "completed"
+    },
+    {
+      "issue": 35,
+      "body": "Confirmed URL input risk. Image downloads now validate every resolved address, reject nonpublic/multicast/transition destinations, and connect to the already-validated address without a second DNS lookup. HTTPS still verifies the original hostname. Redirects are not followed; no ERiC credentials, cookies or proxy settings are forwarded. Downloads are streamed with a 20 MiB cap, content-type and image-header checks, and bounded reads; compressed transfers are rejected. Tests use local HTTP servers for redirects, HTML, bad magic and declared/streamed oversize bodies, plus address-pinning and TLS tests. A public hostname resolving to a nonpublic address is intentionally rejected; use an authorized local image in that environment. Linux CI also checks a fixed public HTTPS PNG without calling ERiC.\n\n[Batch review and verification scope](https://github.com/SuntekCorps-xLab/eric-compliance-suite/blob/main/reports/2026-09-08-issue-review.md).",
+      "close_reason": "completed"
+    },
+    {
+      "issue": 36,
+      "body": "This is a duplicate of #30. The I001 Skill field list has been aligned with the existing reference there. No new I001 live call is claimed. Closing this duplicate so discussion remains in #30.\n\n[Batch review and verification scope](https://github.com/SuntekCorps-xLab/eric-compliance-suite/blob/main/reports/2026-09-08-issue-review.md).",
+      "close_reason": "not_planned"
+    },
+    {
+      "issue": 37,
+      "body": "Documented the argparse ordering constraint in the Skill, README and image-command help. Put the image before multi-value options, or terminate options with --, for example: d001 --dry-run --regions US GB -- /absolute/image.png. A subprocess test verifies the separator form from an unrelated working directory. Existing positional syntax remains compatible; the CLI does not guess which arbitrary --loc value is intended as an image.\n\n[Batch review and verification scope](https://github.com/SuntekCorps-xLab/eric-compliance-suite/blob/main/reports/2026-09-08-issue-review.md).",
+      "close_reason": "completed"
+    },
+    {
+      "issue": 38,
+      "body": "Mock-file failures now identify --mock-response and the affected path. Encoding errors instruct users to save UTF-8 JSON (BOM accepted); syntax errors include line/column, and file errors identify the error class and path/permission remedy. Tests cover invalid JSON, GBK text, directories and a valid UTF-8 BOM file. No API or token access is needed.\n\n[Batch review and verification scope](https://github.com/SuntekCorps-xLab/eric-compliance-suite/blob/main/reports/2026-09-08-issue-review.md).",
+      "close_reason": "completed"
+    },
+    {
+      "issue": 39,
+      "body": "This is the incomplete duplicate of #40. The complete report is answered there with the offline contract, local fixture command and regression coverage. Closing this duplicate.\n\n[Batch review and verification scope](https://github.com/SuntekCorps-xLab/eric-compliance-suite/blob/main/reports/2026-09-08-issue-review.md).",
+      "close_reason": "not_planned"
+    },
+    {
+      "issue": 40,
+      "body": "This is intentional behavior, already described in the offline contract and covered by URL-rejection tests. --dry-run and --mock-response promise no network access, so they cannot download an image URL. The README input section and offline guide now put this boundary next to the URL instructions. Use python3 scripts/detect.py p001 tests/fixtures/sample.png --dry-run for zero-point local validation. Local HTTP tests exercise the URL downloader separately without calling ERiC. We are retaining the no-network contract rather than adding an implicit download to offline mode.\n\n[Batch review and verification scope](https://github.com/SuntekCorps-xLab/eric-compliance-suite/blob/main/reports/2026-09-08-issue-review.md).",
+      "close_reason": "not_planned"
+    }
+  ]
+}

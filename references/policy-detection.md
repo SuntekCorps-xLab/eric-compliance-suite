@@ -125,7 +125,7 @@ P004-P007 的零点数依据 [2026-09-04 接入验证](https://github.com/Suntek
 
 CLI 的 `--sites` 仅配置 Amazon，支持 br, fr, au, us, uk, jp, it, es, mx, de, ca（英国为 `uk`），默认 `us`。
 
-`--platform-sites` 覆盖 `--sites`，必须是非空对象，平台名为非空字符串，值为包含非空字符串的非空站点数组。站点代码转为小写，平台键保留原值。Amazon 的站点列表同样用于 JSON 输入，匹配平台名时忽略大小写及两端空白；其他平台不套用 Amazon 列表，由服务端判断站点是否支持。CLI 暂未维护其他平台的完整站点列表，因此试运行通过只说明本地输入结构有效。
+`--platform-sites` 覆盖 `--sites`，必须是非空对象，平台名为非空字符串，值为包含非空字符串的非空站点数组。平台名去除两端空白并转为小写，站点代码转为小写；平台名规范化后重复会被拒绝。Amazon 的站点列表同样用于 JSON 输入，匹配平台名时忽略大小写及两端空白；其他平台不套用 Amazon 列表，由服务端判断站点是否支持。CLI 暂未维护其他平台的完整站点列表，因此试运行通过只说明本地输入结构有效。
 
 2026-09-07 独立实测确认 `{"tiktok":["sg"]}` 返回了 TikTok / SG 政策记录，见 [issue #17 验证记录](../reports/2026-09-07-issue-17-verification.md)。该证据仅覆盖 TikTok SG，没有推断 TikTok 的完整站点范围或其他平台支持情况。
 
@@ -213,6 +213,8 @@ python3 scripts/detect.py p002 --title "Wireless earbuds with charging case" \
 
 ---
 
+P002 的 `data.risk_feature_list[]` 与 `data.list[]` 同级。2026-09-05 留存响应中条目字段为 `type`（类型/标签）、`score`（原始分数）、`desc`（描述）；未确认分数范围或命中阈值。CLI 独立展示整个特征条目，即使政策列表为空也会输出；对于其他字段写法同样原样保留，不把空结果等同于无风险。政策原文 `content_url` 与 P001 的 `pd_img_oss_url` 直接显示为证据链接，不自动访问。
+
 ## P004 风险特征词联想
 
 ### 接口信息
@@ -241,7 +243,9 @@ python3 scripts/detect.py p002 --title "Wireless earbuds with charging case" \
 |-----------|------|-------------|
 | `word_arr` | array | 联想出的清晰特征词列表（不包含输入词本身） |
 | `status` | integer | -2=含糊无关, -1=已够清晰, 0=模糊匹配出多个清晰词 |
-| `suggestion_num` | integer | 联想词总数 |
+| `suggestionNum` | integer | 联想词总数 |
+
+`suggestionNum` 为 2026-09-05 留存实测响应的字段名；CLI 也兼容旧写法 `suggestion_num`。
 
 ### 响应示例
 
@@ -258,7 +262,7 @@ python3 scripts/detect.py p002 --title "Wireless earbuds with charging case" \
       "黑色开刃求生刀"
     ],
     "status": 0,
-    "suggestion_num": 24
+    "suggestionNum": 24
   },
   "request_id": "20241212110705-lQVMxPjt8TnDlR7n"
 }
@@ -280,6 +284,8 @@ python3 scripts/detect.py p002 --title "Wireless earbuds with charging case" \
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `word` | string | true | 要保存的特征词 |
+
+`suggestionNum` 为 2026-09-05 留存实测响应的字段名；CLI 也兼容旧写法 `suggestion_num`。
 
 ### 响应示例
 
@@ -309,6 +315,8 @@ python3 scripts/detect.py p002 --title "Wireless earbuds with charging case" \
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `id` | integer | true | 特征词 ID 编号 |
+
+`suggestionNum` 为 2026-09-05 留存实测响应的字段名；CLI 也兼容旧写法 `suggestion_num`。
 
 ### 响应示例
 
@@ -365,6 +373,8 @@ python3 scripts/detect.py p002 --title "Wireless earbuds with charging case" \
 | `pull_status` | integer | 0=未拉取, 1=拉取成功, 2=拉取失败 |
 | `words` | string | 特征风险词 |
 | `create_time` | string | 创建时间 |
+
+`suggestionNum` 为 2026-09-05 留存实测响应的字段名；CLI 也兼容旧写法 `suggestion_num`。
 
 ### 响应示例
 
