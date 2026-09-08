@@ -135,7 +135,8 @@ class ResponseHandlingTests(unittest.TestCase):
                 code, _, error, api = invoke(COMMANDS["t001"] + ["--mock-response", str(path)], token="")
                 self.assertEqual(code, 1)
                 self.assertIn("--mock-response", error)
-                self.assertIn(str(path), error)
+                # Diagnostics use repr so backslashes and control characters are escaped.
+                self.assertIn(repr(str(path)), error)
                 self.assertIn(message, error)
                 api.assert_not_called()
             code, _, error, _ = invoke(COMMANDS["t001"] + ["--mock-response", directory], token="")
